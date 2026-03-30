@@ -1,0 +1,43 @@
+name: shift_app
+description: "A new Flutter project."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.11.3
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+
+  # 日本語ローカライズ
+  flutter_localizations:
+    sdk: flutter
+
+  # Supabase
+  supabase_flutter: ^2.5.0
+
+  # ルーティング
+  go_router: ^13.0.0
+
+  # 状態管理
+  flutter_riverpod: ^2.5.0
+
+  # 日付操作
+  intl: ^0.20.2
+
+  # PDF出力
+  pdf: ^3.10.0
+  printing: ^5.12.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
