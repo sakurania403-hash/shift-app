@@ -1,0 +1,2908 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>シフト管理システム</title><!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>シフト管理システム</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;700&display=swap');
+
+  :root {
+    --green: #1D9E75;
+    --green-dark: #0F6E56;
+    --green-light: #E1F5EE;
+    --green-mid: #9FE1CB;
+    --amber: #EF9F27;
+    --amber-light: #FAEEDA;
+    --blue: #378ADD;
+    --blue-light: #E6F1FB;
+    --red: #E24B4A;
+    --red-light: #FCEBEB;
+    --gray-50: #F7F6F3;
+    --gray-100: #EDECEA;
+    --gray-200: #D3D1C7;
+    --gray-400: #888780;
+    --gray-600: #5F5E5A;
+    --gray-900: #1C1C1A;
+    --text: #1C1C1A;
+    --text-sub: #5F5E5A;
+    --text-hint: #888780;
+    --border: rgba(0,0,0,0.1);
+    --border-mid: rgba(0,0,0,0.18);
+    --surface: #fff;
+    --bg: #F7F6F3;
+    --radius: 10px;
+    --radius-lg: 14px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Noto Sans JP', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.6;
+    min-height: 100vh;
+  }
+
+  /* ── LOGIN ── */
+  #login-screen {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+    background: var(--bg);
+  }
+  .login-logo {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--green);
+    letter-spacing: -0.5px;
+    margin-bottom: 6px;
+  }
+  .login-sub {
+    font-size: 13px;
+    color: var(--text-sub);
+    margin-bottom: 2.5rem;
+  }
+  .login-card {
+    background: var(--surface);
+    border: 0.5px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 2rem;
+    width: 100%;
+    max-width: 380px;
+  }
+  .login-card h2 {
+    font-size: 15px;
+    font-weight: 500;
+    margin-bottom: 1.5rem;
+    color: var(--text);
+  }
+  .role-select {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 1.25rem;
+  }
+  .role-btn {
+    padding: 10px 8px;
+    border: 1.5px solid var(--border-mid);
+    border-radius: var(--radius);
+    background: none;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 13px;
+    color: var(--text-sub);
+    transition: all 0.15s;
+    text-align: center;
+  }
+  .role-btn.active {
+    border-color: var(--green);
+    background: var(--green-light);
+    color: var(--green-dark);
+    font-weight: 500;
+  }
+  .staff-select-wrap { display: none; margin-bottom: 1rem; }
+  .staff-select-wrap.visible { display: block; }
+  label.field-label {
+    display: block;
+    font-size: 12px;
+    color: var(--text-sub);
+    margin-bottom: 4px;
+  }
+  select, input[type="text"], input[type="password"], input[type="number"] {
+    width: 100%;
+    padding: 9px 12px;
+    border: 0.5px solid var(--border-mid);
+    border-radius: var(--radius);
+    font-family: inherit;
+    font-size: 14px;
+    background: var(--surface);
+    color: var(--text);
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  select:focus, input:focus { border-color: var(--green); }
+  .field-group { margin-bottom: 1rem; }
+  .pin-hint {
+    font-size: 11px;
+    color: var(--text-hint);
+    margin-top: 4px;
+  }
+  .btn-login {
+    width: 100%;
+    padding: 11px;
+    background: var(--green);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius);
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s;
+    margin-top: 0.5rem;
+  }
+  .btn-login:hover { background: var(--green-dark); }
+  .error-msg { color: var(--red); font-size: 12px; margin-top: 8px; display: none; }
+
+  /* ── MAIN APP ── */
+  #app { display: none; min-height: 100vh; }
+
+  .topbar {
+    background: var(--surface);
+    border-bottom: 0.5px solid var(--border);
+    padding: 0 1.5rem;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    z-index: 50;
+  }
+  .topbar-left { display: flex; align-items: center; gap: 12px; }
+  .topbar-logo { font-size: 16px; font-weight: 700; color: var(--green); }
+  .role-badge {
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 20px;
+    font-weight: 500;
+  }
+  .role-badge.admin { background: var(--amber-light); color: #854F0B; }
+  .role-badge.staff { background: var(--green-light); color: var(--green-dark); }
+  .topbar-right { display: flex; align-items: center; gap: 10px; }
+  .user-name { font-size: 13px; color: var(--text-sub); }
+  .btn-logout {
+    font-size: 12px;
+    padding: 5px 12px;
+    border: 0.5px solid var(--border-mid);
+    border-radius: var(--radius);
+    background: none;
+    cursor: pointer;
+    color: var(--text-sub);
+    font-family: inherit;
+  }
+  .btn-logout:hover { background: var(--gray-100); }
+
+  .nav-tabs {
+    background: var(--surface);
+    border-bottom: 0.5px solid var(--border);
+    padding: 0 1.5rem;
+    display: flex;
+    gap: 0;
+    overflow-x: auto;
+  }
+  .nav-tab {
+    padding: 12px 16px;
+    font-size: 13px;
+    color: var(--text-sub);
+    border: none;
+    background: none;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    white-space: nowrap;
+    font-family: inherit;
+    font-weight: 400;
+  }
+  .nav-tab.active {
+    color: var(--green-dark);
+    border-bottom-color: var(--green);
+    font-weight: 500;
+  }
+
+  .content { padding: 1.5rem; max-width: 1100px; margin: 0 auto; }
+
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  /* ── CARDS & BUTTONS ── */
+  .card {
+    background: var(--surface);
+    border: 0.5px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 1rem;
+  }
+  .card-title {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text);
+    margin-bottom: 1rem;
+  }
+  .btn {
+    padding: 8px 14px;
+    border-radius: var(--radius);
+    border: 0.5px solid var(--border-mid);
+    background: none;
+    font-size: 13px;
+    cursor: pointer;
+    color: var(--text);
+    font-family: inherit;
+    transition: all 0.12s;
+  }
+  .btn:hover { background: var(--gray-100); }
+  .btn-green { background: var(--green); color: #fff; border-color: var(--green); }
+  .btn-green:hover { background: var(--green-dark); }
+  .btn-amber { background: var(--amber); color: #fff; border-color: var(--amber); }
+  .btn-red { background: var(--red); color: #fff; border-color: var(--red); }
+  .btn-sm { padding: 5px 10px; font-size: 12px; }
+
+  /* ── STATS ── */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 10px;
+    margin-bottom: 1.25rem;
+  }
+  .stat-box {
+    background: var(--surface);
+    border: 0.5px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1rem;
+  }
+  .stat-label { font-size: 12px; color: var(--text-sub); margin-bottom: 4px; }
+  .stat-val { font-size: 24px; font-weight: 500; color: var(--text); }
+  .stat-sub { font-size: 11px; color: var(--text-hint); margin-top: 2px; }
+
+  /* ── CALENDAR ── */
+  .cal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .cal-nav { display: flex; align-items: center; gap: 10px; }
+  .cal-nav button {
+    background: none;
+    border: 0.5px solid var(--border-mid);
+    border-radius: var(--radius);
+    padding: 6px 12px;
+    cursor: pointer;
+    font-size: 14px;
+    color: var(--text);
+  }
+  .cal-nav button:hover { background: var(--gray-100); }
+  .cal-month { font-size: 16px; font-weight: 500; }
+  .cal-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+  table.cal {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    table-layout: fixed;
+  }
+  table.cal th {
+    padding: 6px 4px;
+    text-align: center;
+    color: var(--text-sub);
+    font-weight: 400;
+    border-bottom: 0.5px solid var(--border);
+    font-size: 12px;
+  }
+  table.cal td {
+    border: 0.5px solid var(--border);
+    vertical-align: top;
+    min-height: 80px;
+    padding: 4px;
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+  table.cal td:hover { background: var(--gray-50); }
+  table.cal td.other-month { background: var(--bg); cursor: default; }
+  table.cal td.other-month:hover { background: var(--bg); }
+  .day-num {
+    font-size: 12px;
+    color: var(--text-sub);
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 3px;
+    border-radius: 50%;
+  }
+  .day-num.today { background: var(--green); color: #fff; font-weight: 500; }
+  .day-num.sun { color: #E24B4A; }
+  .day-num.sat { color: #378ADD; }
+  .shift-pill {
+    font-size: 10px;
+    padding: 2px 5px;
+    border-radius: 20px;
+    margin-bottom: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: block;
+    cursor: pointer;
+  }
+  .wish-dot {
+    font-size: 10px;
+    padding: 2px 5px;
+    border-radius: 20px;
+    margin-bottom: 2px;
+    background: var(--amber-light);
+    color: #854F0B;
+    border: 0.5px solid #EF9F27;
+    display: block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* ── STAFF MANAGEMENT ── */
+  .staff-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+    gap: 10px;
+  }
+  .staff-card {
+    background: var(--surface);
+    border: 0.5px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 1rem 1.25rem;
+  }
+  .staff-avatar {
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    font-weight: 500;
+    flex-shrink: 0;
+  }
+  .staff-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .staff-name-block .sname { font-size: 14px; font-weight: 500; }
+  .staff-name-block .srole { font-size: 11px; color: var(--text-sub); margin-top: 1px; }
+  .days-wrap { display: flex; gap: 4px; margin-bottom: 8px; }
+  .day-dot {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    border: 0.5px solid var(--border-mid);
+    background: var(--gray-50);
+    color: var(--text-sub);
+    cursor: pointer;
+    user-select: none;
+  }
+  .day-dot.on { background: var(--green); border-color: var(--green); color: #fff; }
+  .pin-row { font-size: 11px; color: var(--text-hint); margin-top: 4px; }
+  .staff-card-actions { display: flex; gap: 6px; margin-top: 8px; }
+
+  /* ── WISH PANEL (STAFF) ── */
+  .month-wish-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 4px;
+    margin-bottom: 1rem;
+  }
+  .wish-day-header {
+    text-align: center;
+    font-size: 11px;
+    color: var(--text-sub);
+    padding: 4px 0;
+  }
+  .wish-cell {
+    border: 0.5px solid var(--border);
+    border-radius: 6px;
+    padding: 4px;
+    min-height: 60px;
+    cursor: pointer;
+    background: var(--surface);
+    transition: background 0.1s;
+  }
+  .wish-cell:hover { background: var(--gray-50); }
+  .wish-cell.selected { background: var(--green-light); border-color: var(--green-mid); }
+  .wish-cell.off-day { background: var(--bg); cursor: default; opacity: 0.5; }
+  .wish-cell.other-m { background: var(--bg); cursor: default; opacity: 0.3; }
+  .wish-day-num { font-size: 11px; color: var(--text-sub); text-align: center; margin-bottom: 3px; }
+  .wish-day-num.sun { color: var(--red); }
+  .wish-day-num.sat { color: var(--blue); }
+  .wish-time-wrap {
+    display: none;
+    flex-direction: column;
+    gap: 2px;
+    margin-top: 3px;
+  }
+  .wish-cell.selected .wish-time-wrap { display: flex; }
+  .wish-time-input {
+    font-size: 10px;
+    width: 100%;
+    padding: 1px 2px;
+    border: 0.5px solid var(--border-mid);
+    border-radius: 4px;
+    background: var(--surface);
+    color: var(--text);
+  }
+  .wish-preset-row {
+    display: none;
+    gap: 2px;
+    flex-wrap: wrap;
+    margin-top: 2px;
+  }
+  .wish-cell.selected .wish-preset-row { display: flex; }
+  .wish-preset-btn {
+    font-size: 9px;
+    padding: 1px 4px;
+    border: 0.5px solid var(--border-mid);
+    border-radius: 3px;
+    background: none;
+    cursor: pointer;
+    color: var(--text-sub);
+    font-family: inherit;
+    white-space: nowrap;
+  }
+  .wish-preset-btn:hover { background: var(--gray-100); }
+
+  /* ── MODAL ── */
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 200;
+    padding: 1rem;
+  }
+  .modal-box {
+    background: var(--surface);
+    border-radius: var(--radius-lg);
+    border: 0.5px solid var(--border);
+    padding: 1.5rem;
+    width: 100%;
+    max-width: 420px;
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+  .modal-title { font-size: 15px; font-weight: 500; margin-bottom: 1.25rem; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 1.25rem; }
+
+  /* ── TAGS & BADGES ── */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 500;
+  }
+  .badge-green { background: var(--green-light); color: var(--green-dark); }
+  .badge-amber { background: var(--amber-light); color: #854F0B; }
+  .badge-red { background: var(--red-light); color: #A32D2D; }
+  .badge-blue { background: var(--blue-light); color: #185FA5; }
+  .badge-gray { background: var(--gray-100); color: var(--gray-600); }
+
+  /* ── WISH REVIEW (ADMIN) ── */
+  .wish-review-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .wish-review-table th {
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 0.5px solid var(--border);
+    color: var(--text-sub);
+    font-weight: 400;
+    font-size: 12px;
+  }
+  .wish-review-table td {
+    padding: 8px 10px;
+    border-bottom: 0.5px solid var(--border);
+    vertical-align: middle;
+  }
+  .wish-review-table tr:last-child td { border-bottom: none; }
+
+  /* ── SETTINGS ── */
+  .settings-section { margin-bottom: 1.5rem; }
+  .settings-section h3 { font-size: 13px; font-weight: 500; color: var(--text-sub); margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .setting-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 0.5px solid var(--border); }
+  .setting-row:last-child { border-bottom: none; }
+  .setting-label { font-size: 13px; color: var(--text); }
+  .setting-sub { font-size: 11px; color: var(--text-hint); margin-top: 2px; }
+  .setting-control { flex-shrink: 0; margin-left: 12px; }
+
+  /* ── LINE NOTIFY ── */
+  .line-status { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+  .line-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--gray-200); }
+  .line-dot.connected { background: var(--green); }
+
+  /* ── CONFIRM ALERT ── */
+  .alert-box {
+    padding: 12px 16px;
+    border-radius: var(--radius);
+    font-size: 13px;
+    margin-bottom: 1rem;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .alert-green { background: var(--green-light); color: var(--green-dark); border: 0.5px solid var(--green-mid); }
+  .alert-amber { background: var(--amber-light); color: #854F0B; border: 0.5px solid #EF9F27; }
+
+  .row-flex { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+  .gap8 { gap: 8px; }
+  .flex { display: flex; align-items: center; }
+
+  /* PDF print styles */
+  @media print {
+    #login-screen { display: none !important; }
+    .topbar, .nav-tabs, .cal-actions, .btn { display: none !important; }
+    .content { padding: 0; }
+    .card { border: 0.5px solid #ccc; }
+    body { background: white; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ══════════ LOGIN ══════════ -->
+<div id="login-screen">
+  <div class="login-logo">ShiftMgr</div>
+  <div class="login-sub">飲食店向けシフト管理システム</div>
+  <div class="login-card">
+    <h2>ログイン</h2>
+    <div class="field-group">
+      <label class="field-label">役割を選択</label>
+      <div class="role-select">
+        <button class="role-btn active" onclick="selectRole('admin')" id="role-admin">管理者<br><span style="font-size:10px;font-weight:300">店長・料理長</span></button>
+        <button class="role-btn" onclick="selectRole('staff')" id="role-staff">スタッフ<br><span style="font-size:10px;font-weight:300">アルバイト・パート</span></button>
+      </div>
+    </div>
+    <div class="staff-select-wrap field-group" id="staff-select-wrap">
+      <label class="field-label">名前を選択</label>
+      <select id="login-staff-select"></select>
+    </div>
+    <div class="field-group">
+      <label class="field-label">PINコード</label>
+      <input type="password" id="login-pin" maxlength="4" placeholder="4桁のPIN" />
+      <div class="pin-hint">管理者PIN: 1234 ／ スタッフPIN: 各自の4桁（初期: 0000）</div>
+    </div>
+    <button class="btn-login" onclick="doLogin()">ログイン</button>
+    <div class="error-msg" id="login-error">PINが正しくありません</div>
+  </div>
+</div>
+
+<!-- ══════════ APP ══════════ -->
+<div id="app">
+  <div class="topbar">
+    <div class="topbar-left">
+      <span class="topbar-logo">ShiftMgr</span>
+      <span class="role-badge" id="role-badge"></span>
+    </div>
+    <div class="topbar-right">
+      <span class="user-name" id="user-name-display"></span>
+      <button class="btn-logout" onclick="doLogout()">ログアウト</button>
+    </div>
+  </div>
+
+  <div class="nav-tabs" id="nav-tabs"></div>
+
+  <div class="content">
+    <!-- ADMIN PANELS -->
+    <div class="panel" id="panel-dashboard">
+      <div class="stats-grid" id="dash-stats"></div>
+      <div class="card">
+        <div class="card-title">希望シフト提出状況（今月）</div>
+        <div id="wish-summary-list"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">直近のお知らせ</div>
+        <div id="notice-list" style="font-size:13px;color:var(--text-sub)">シフトを自動生成・公開するとスタッフに通知されます。</div>
+      </div>
+    </div>
+
+    <div class="panel" id="panel-calendar">
+      <div class="cal-header">
+        <div class="cal-nav">
+          <button onclick="changeMonth(-1)">‹</button>
+          <span class="cal-month" id="cal-month-label"></span>
+          <button onclick="changeMonth(1)">›</button>
+        </div>
+        <div class="cal-actions">
+          <button class="btn" onclick="toggleWishView()" id="wish-view-btn">希望シフトを表示</button>
+          <button class="btn btn-green" onclick="autoGenerate()">自動生成</button>
+          <button class="btn" onclick="clearMonthShifts()">クリア</button>
+          <button class="btn btn-amber" onclick="publishShifts()">スタッフに公開</button>
+          <button class="btn" onclick="printCalendar()">印刷 / PDF</button>
+        </div>
+      </div>
+      <div class="card" style="padding:0.75rem">
+        <table class="cal" id="admin-cal">
+          <thead>
+            <tr><th>日</th><th>月</th><th>火</th><th>水</th><th>木</th><th>金</th><th>土</th></tr>
+          </thead>
+          <tbody id="admin-cal-body"></tbody>
+        </table>
+      </div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:8px;font-size:12px;color:var(--text-sub)">
+        <span>● クリックでシフト追加</span>
+        <span>● シフトをクリックで削除</span>
+        <span style="color:#854F0B">● 黄色 = 希望シフト</span>
+      </div>
+    </div>
+
+    <div class="panel" id="panel-staff-mgmt">
+      <div class="row-flex" style="margin-bottom:1rem">
+        <span style="color:var(--text-sub);font-size:13px">スタッフ一覧 — 勤務可能曜日・PINを管理</span>
+        <button class="btn btn-green" onclick="openAddStaffModal()">＋ スタッフ追加</button>
+      </div>
+      <div class="staff-grid" id="staff-grid"></div>
+    </div>
+
+    <div class="panel" id="panel-wish-review">
+      <div class="row-flex" style="margin-bottom:1rem">
+        <span style="font-weight:500">希望シフト一覧</span>
+        <div class="cal-nav">
+          <button onclick="changeWishReviewMonth(-1)">‹</button>
+          <span id="wish-review-month"></span>
+          <button onclick="changeWishReviewMonth(1)">›</button>
+        </div>
+      </div>
+      <div class="card" style="padding:0">
+        <div style="overflow-x:auto">
+          <table class="wish-review-table" id="wish-review-table">
+            <thead><tr><th>スタッフ</th><th>役職</th><th>提出日</th><th>希望日数</th><th>状態</th></tr></thead>
+            <tbody id="wish-review-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" id="panel-settings">
+      <div class="card">
+        <div class="settings-section">
+          <h3>LINE通知設定</h3>
+          <div class="setting-row">
+            <div>
+              <div class="setting-label">LINE Notify Webhook URL</div>
+              <div class="setting-sub">シフト公開時にLINEグループへ通知されます</div>
+            </div>
+            <div class="setting-control" style="display:flex;gap:8px;align-items:center">
+              <div class="line-status" id="line-status-badge">
+                <div class="line-dot" id="line-dot"></div>
+                <span id="line-status-text">未設定</span>
+              </div>
+            </div>
+          </div>
+          <div style="margin-top:10px;display:flex;gap:8px">
+            <input type="text" id="line-webhook-input" placeholder="https://notify-api.line.me/api/notify または Webhook URL" style="flex:1" />
+            <button class="btn btn-green" onclick="saveLINEWebhook()">保存</button>
+            <button class="btn" onclick="testLINE()">テスト送信</button>
+          </div>
+        </div>
+        <div class="settings-section">
+          <h3>シフト自動生成ルール</h3>
+          <div class="setting-row">
+            <div>
+              <div class="setting-label">平日最低スタッフ数</div>
+            </div>
+            <div class="setting-control">
+              <input type="number" id="rule-weekday-min" value="2" min="1" max="10" style="width:70px" />
+            </div>
+          </div>
+          <div class="setting-row">
+            <div>
+              <div class="setting-label">土日最低スタッフ数</div>
+            </div>
+            <div class="setting-control">
+              <input type="number" id="rule-weekend-min" value="3" min="1" max="10" style="width:70px" />
+            </div>
+          </div>
+          <div class="setting-row">
+            <div>
+              <div class="setting-label">希望シフトを優先する</div>
+              <div class="setting-sub">ONにすると希望提出済みの日を自動生成時に優先</div>
+            </div>
+            <div class="setting-control">
+              <input type="checkbox" id="rule-wish-priority" checked style="width:auto" />
+            </div>
+          </div>
+          <div style="margin-top:10px">
+            <button class="btn btn-green" onclick="saveRules()">ルールを保存</button>
+          </div>
+        </div>
+        <div class="settings-section">
+          <h3>管理者PINの変更</h3>
+          <div style="display:flex;gap:8px;margin-top:6px">
+            <input type="password" id="new-admin-pin" placeholder="新しいPIN（4桁）" maxlength="4" style="width:180px" />
+            <button class="btn" onclick="changeAdminPIN()">変更</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- STAFF PANELS -->
+    <div class="panel" id="panel-my-shift">
+      <div class="cal-header">
+        <div class="cal-nav">
+          <button onclick="changeStaffMonth(-1)">‹</button>
+          <span class="cal-month" id="staff-cal-month"></span>
+          <button onclick="changeStaffMonth(1)">›</button>
+        </div>
+      </div>
+      <div id="staff-shift-status" style="margin-bottom:1rem"></div>
+      <div class="card" style="padding:0.75rem">
+        <table class="cal" id="staff-cal">
+          <thead>
+            <tr><th>日</th><th>月</th><th>火</th><th>水</th><th>木</th><th>金</th><th>土</th></tr>
+          </thead>
+          <tbody id="staff-cal-body"></tbody>
+        </table>
+      </div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:8px;font-size:12px;color:var(--text-sub)">
+        <span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;border-radius:3px;background:var(--green-light);border:0.5px solid var(--green-mid);display:inline-block"></span> 自分のシフト</span>
+        <span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;border-radius:3px;background:var(--amber-light);border:0.5px solid #EF9F27;display:inline-block"></span> 希望提出済み</span>
+      </div>
+    </div>
+
+    <div class="panel" id="panel-wish-submit">
+      <div class="cal-header">
+        <div class="cal-nav">
+          <button onclick="changeWishMonth(-1)">‹</button>
+          <span class="cal-month" id="wish-month-label"></span>
+          <button onclick="changeWishMonth(1)">›</button>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-green" onclick="submitWishes()">希望を提出する</button>
+          <button class="btn" onclick="clearWishes()">クリア</button>
+        </div>
+      </div>
+      <div id="wish-submit-alert" style="display:none" class="alert-box alert-green">
+        ✓ 希望シフトを提出しました。店長の確認をお待ちください。
+      </div>
+      <div style="font-size:12px;color:var(--text-sub);margin-bottom:0.75rem">
+        希望する日付をクリックして時間帯を選んでください。日曜・土曜は赤・青で表示されます。
+      </div>
+      <div class="card" style="padding:0.75rem">
+        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-bottom:3px">
+          <div class="wish-day-header" style="color:var(--red)">日</div>
+          <div class="wish-day-header">月</div>
+          <div class="wish-day-header">火</div>
+          <div class="wish-day-header">水</div>
+          <div class="wish-day-header">木</div>
+          <div class="wish-day-header">金</div>
+          <div class="wish-day-header" style="color:var(--blue)">土</div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px" id="wish-grid"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ MODALS ══════════ -->
+<div class="modal-backdrop" id="modal-add-shift" style="display:none" onclick="if(event.target===this)closeModal('modal-add-shift')">
+  <div class="modal-box">
+    <div class="modal-title" id="modal-shift-title">シフト追加</div>
+    <div class="field-group">
+      <label class="field-label">スタッフ</label>
+      <select id="modal-shift-staff"></select>
+    </div>
+    <div class="field-group">
+      <label class="field-label">開始時間 〜 終了時間</label>
+      <div style="display:flex;align-items:center;gap:8px">
+        <input type="time" id="modal-shift-start" value="10:00" style="flex:1" />
+        <span style="color:var(--text-sub);font-size:13px">〜</span>
+        <input type="time" id="modal-shift-end" value="17:00" style="flex:1" />
+      </div>
+      <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
+        <button class="btn btn-sm" onclick="setShiftPreset('08:00','13:00')">朝 08–13</button>
+        <button class="btn btn-sm" onclick="setShiftPreset('11:00','16:00')">昼 11–16</button>
+        <button class="btn btn-sm" onclick="setShiftPreset('16:00','21:00')">夜 16–21</button>
+        <button class="btn btn-sm" onclick="setShiftPreset('10:00','20:00')">全日 10–20</button>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal('modal-add-shift')">キャンセル</button>
+      <button class="btn btn-green" onclick="confirmAddShift()">追加</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="modal-add-staff" style="display:none" onclick="if(event.target===this)closeModal('modal-add-staff')">
+  <div class="modal-box">
+    <div class="modal-title">スタッフ追加</div>
+    <div class="field-group">
+      <label class="field-label">名前</label>
+      <input type="text" id="new-staff-name" placeholder="例: 田中 花子" />
+    </div>
+    <div class="field-group">
+      <label class="field-label">役職</label>
+      <select id="new-staff-role">
+        <option value="ホール">ホール</option>
+        <option value="キッチン">キッチン</option>
+        <option value="バリスタ">バリスタ</option>
+        <option value="店長">店長</option>
+        <option value="料理長">料理長</option>
+      </select>
+    </div>
+    <div class="field-group">
+      <label class="field-label">勤務可能曜日</label>
+      <div style="display:flex;gap:6px;margin-top:4px" id="new-staff-days">
+        <div class="day-dot" data-d="0" onclick="toggleNewDay(0)">日</div>
+        <div class="day-dot on" data-d="1" onclick="toggleNewDay(1)">月</div>
+        <div class="day-dot on" data-d="2" onclick="toggleNewDay(2)">火</div>
+        <div class="day-dot on" data-d="3" onclick="toggleNewDay(3)">水</div>
+        <div class="day-dot on" data-d="4" onclick="toggleNewDay(4)">木</div>
+        <div class="day-dot on" data-d="5" onclick="toggleNewDay(5)">金</div>
+        <div class="day-dot" data-d="6" onclick="toggleNewDay(6)">土</div>
+      </div>
+    </div>
+    <div class="field-group">
+      <label class="field-label">PINコード（4桁）</label>
+      <input type="password" id="new-staff-pin" placeholder="0000" maxlength="4" />
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal('modal-add-staff')">キャンセル</button>
+      <button class="btn btn-green" onclick="confirmAddStaff()">追加</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ══════════ DATA STORE ══════════
+const STORE_KEY = 'shiftmgr_v2';
+function formatTime(t) {
+  if (!t) return '';
+  if (t.start && t.end) return `${t.start}–${t.end}`;
+  const m = { morning:'08–13時', lunch:'11–16時', dinner:'17–22時', full:'10–20時' };
+  return m[t] || t;
+}
+function timeLabel(shift) {
+  if (shift.start && shift.end) return `${shift.start}–${shift.end}`;
+  const m = { morning:'08–13時', lunch:'11–16時', dinner:'17–22時', full:'10–20時' };
+  return m[shift.time] || shift.time || '';
+}
+const COLORS = [
+  {bg:'#E1F5EE',text:'#0F6E56',border:'#1D9E75'},
+  {bg:'#E6F1FB',text:'#185FA5',border:'#378ADD'},
+  {bg:'#FAEEDA',text:'#854F0B',border:'#EF9F27'},
+  {bg:'#FBEAF0',text:'#993556',border:'#D4537E'},
+  {bg:'#EEEDFE',text:'#534AB7',border:'#7F77DD'},
+  {bg:'#FAECE7',text:'#993C1D',border:'#D85A30'},
+  {bg:'#EAF3DE',text:'#3B6D11',border:'#639922'},
+];
+
+function loadData() {
+  try { return JSON.parse(localStorage.getItem(STORE_KEY)) || defaultData(); }
+  catch { return defaultData(); }
+}
+function saveData() { localStorage.setItem(STORE_KEY, JSON.stringify(db)); }
+
+function defaultData() {
+  return {
+    adminPin: '1234',
+    lineWebhook: '',
+    rules: { weekdayMin: 2, weekendMin: 3, wishPriority: true },
+    staff: [
+      {id:1, name:'田中 葵', role:'ホール', days:[1,2,3,4,5], color:0, pin:'0000'},
+      {id:2, name:'山本 拓海', role:'キッチン', days:[0,1,3,5,6], color:1, pin:'0000'},
+      {id:3, name:'佐藤 彩乃', role:'ホール', days:[2,3,4,5,6], color:2, pin:'0000'},
+      {id:4, name:'鈴木 蓮', role:'キッチン', days:[0,1,2,4,6], color:3, pin:'0000'},
+      {id:5, name:'高橋 凛', role:'バリスタ', days:[1,2,3,5,6], color:4, pin:'0000'},
+      {id:6, name:'中村 悠斗', role:'ホール', days:[0,3,4,5,6], color:5, pin:'0000'},
+    ],
+    shifts: {},
+    wishes: {},
+    published: {},
+    notices: [],
+    idCounter: 100,
+  };
+}
+
+let db = loadData();
+let currentUser = null;
+let isAdmin = false;
+
+// ── Calendar state ──
+let calYear = new Date().getFullYear();
+let calMonth = new Date().getMonth();
+let staffCalYear = new Date().getFullYear();
+let staffCalMonth = new Date().getMonth();
+let wishYear = new Date().getFullYear();
+let wishMonth = new Date().getMonth() + 1 <= 12 ? new Date().getMonth() + 1 : 0;
+let wishReviewYear = new Date().getFullYear();
+let wishReviewMonth = new Date().getMonth();
+let showWishOverlay = false;
+let modalShiftDate = null;
+let shiftIdCounter = 2000;
+
+function nextId() { return db.idCounter++; }
+
+// ══════════ LOGIN ══════════
+function selectRole(role) {
+  document.getElementById('role-admin').classList.toggle('active', role === 'admin');
+  document.getElementById('role-staff').classList.toggle('active', role === 'staff');
+  document.getElementById('staff-select-wrap').classList.toggle('visible', role === 'staff');
+  if (role === 'staff') {
+    const sel = document.getElementById('login-staff-select');
+    sel.innerHTML = db.staff.map(s => `<option value="${s.id}">${s.name} (${s.role})</option>`).join('');
+  }
+}
+
+function doLogin() {
+  const pin = document.getElementById('login-pin').value;
+  const err = document.getElementById('login-error');
+  const isStaffMode = document.getElementById('role-staff').classList.contains('active');
+  if (isStaffMode) {
+    const sid = parseInt(document.getElementById('login-staff-select').value);
+    const member = db.staff.find(s => s.id === sid);
+    if (!member || pin !== member.pin) { err.style.display = 'block'; return; }
+    currentUser = member;
+    isAdmin = false;
+  } else {
+    if (pin !== db.adminPin) { err.style.display = 'block'; return; }
+    currentUser = {id: 0, name: '管理者', role: '店長・料理長'};
+    isAdmin = true;
+  }
+  err.style.display = 'none';
+  document.getElementById('login-pin').value = '';
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+  initApp();
+}
+
+function doLogout() {
+  currentUser = null;
+  isAdmin = false;
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('login-screen').style.display = 'flex';
+  document.getElementById('login-pin').value = '';
+}
+
+// ══════════ APP INIT ══════════
+function initApp() {
+  document.getElementById('user-name-display').textContent = currentUser.name;
+  const badge = document.getElementById('role-badge');
+  badge.textContent = isAdmin ? '管理者' : 'スタッフ';
+  badge.className = 'role-badge ' + (isAdmin ? 'admin' : 'staff');
+
+  const tabs = document.getElementById('nav-tabs');
+  if (isAdmin) {
+    tabs.innerHTML = `
+      <button class="nav-tab active" onclick="showPanel('dashboard',this)">ダッシュボード</button>
+      <button class="nav-tab" onclick="showPanel('calendar',this)">シフトカレンダー</button>
+      <button class="nav-tab" onclick="showPanel('wish-review',this)">希望シフト確認</button>
+      <button class="nav-tab" onclick="showPanel('staff-mgmt',this)">スタッフ管理</button>
+      <button class="nav-tab" onclick="showPanel('settings',this)">設定</button>
+    `;
+    renderDashboard();
+    renderAdminCal();
+    renderStaffMgmt();
+    renderWishReview();
+    loadSettings();
+  } else {
+    tabs.innerHTML = `
+      <button class="nav-tab active" onclick="showPanel('my-shift',this)">確定シフト</button>
+      <button class="nav-tab" onclick="showPanel('wish-submit',this)">希望シフト提出</button>
+    `;
+    renderStaffCal();
+    renderWishSubmit();
+  }
+}
+
+function showPanel(id, btn) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('panel-' + id).classList.add('active');
+  if (btn) btn.classList.add('active');
+}
+
+// ══════════ DASHBOARD ══════════
+function renderDashboard() {
+  const today = new Date();
+  const y = today.getFullYear(), m = today.getMonth();
+  const prefix = `${y}-${String(m+1).padStart(2,'0')}`;
+  let totalShifts = 0;
+  const staffOnShift = new Set();
+  Object.keys(db.shifts).forEach(k => {
+    if (k.startsWith(prefix)) {
+      db.shifts[k].forEach(s => { totalShifts++; staffOnShift.add(s.staffId); });
+    }
+  });
+  const wishCount = db.staff.filter(s => {
+    const key = `${y}-${String(m+1).padStart(2,'0')}-${s.id}`;
+    return db.wishes[key] && Object.keys(db.wishes[key]).length > 0;
+  }).length;
+  const isPublished = !!db.published[prefix];
+
+  document.getElementById('dash-stats').innerHTML = `
+    <div class="stat-box"><div class="stat-label">今月のシフト数</div><div class="stat-val">${totalShifts}</div></div>
+    <div class="stat-box"><div class="stat-label">参加スタッフ</div><div class="stat-val">${staffOnShift.size}<span style="font-size:16px;font-weight:400"> / ${db.staff.length}名</span></div></div>
+    <div class="stat-box"><div class="stat-label">希望提出済み</div><div class="stat-val">${wishCount}<span style="font-size:16px;font-weight:400"> / ${db.staff.length}名</span></div></div>
+    <div class="stat-box"><div class="stat-label">シフト公開状況</div><div class="stat-val" style="font-size:15px;margin-top:4px"><span class="badge ${isPublished?'badge-green':'badge-amber'}">${isPublished?'公開中':'未公開'}</span></div></div>
+  `;
+
+  const wl = document.getElementById('wish-summary-list');
+  if (db.staff.length === 0) { wl.innerHTML = '<div style="color:var(--text-hint);font-size:13px">スタッフがいません</div>'; return; }
+  wl.innerHTML = `<table class="wish-review-table"><thead><tr><th>名前</th><th>役職</th><th>希望日数</th><th>状態</th></tr></thead><tbody>` +
+    db.staff.map(s => {
+      const key = `${y}-${String(m+1).padStart(2,'0')}-${s.id}`;
+      const w = db.wishes[key] || {};
+      const cnt = Object.keys(w).length;
+      return `<tr><td>${s.name}</td><td><span class="badge badge-gray">${s.role}</span></td><td>${cnt}日</td><td>${cnt > 0 ? '<span class="badge badge-green">提出済</span>' : '<span class="badge badge-amber">未提出</span>'}</td></tr>`;
+    }).join('') + '</tbody></table>';
+}
+
+// ══════════ ADMIN CALENDAR ══════════
+function dKey(y, m, d) { return `${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`; }
+function wKey(y, m, sid) { return `${y}-${String(m+1).padStart(2,'0')}-${sid}`; }
+
+function renderAdminCal() {
+  document.getElementById('cal-month-label').textContent = `${calYear}年 ${calMonth+1}月`;
+  const first = new Date(calYear, calMonth, 1);
+  const last = new Date(calYear, calMonth+1, 0);
+  const startDay = first.getDay();
+  const today = new Date();
+  const cells = Math.ceil((startDay + last.getDate()) / 7) * 7;
+  let day = 1, html = '';
+
+  for (let i = 0; i < cells; i++) {
+    if (i % 7 === 0) html += '<tr>';
+    if (i < startDay || day > last.getDate()) {
+      html += '<td class="other-month"></td>';
+      if (i >= startDay) day++;
+    } else {
+      const dow = (startDay + day - 1) % 7;
+      const isToday = today.getFullYear()===calYear && today.getMonth()===calMonth && today.getDate()===day;
+      const key = dKey(calYear, calMonth, day);
+      const dayShifts = db.shifts[key] || [];
+      const d = day;
+      let cellHTML = `<td onclick="openAddShiftModal(${d},'${key}')">`;
+      cellHTML += `<div class="day-num ${isToday?'today':''} ${dow===0?'sun':''} ${dow===6?'sat':''}">${day}</div>`;
+
+      if (showWishOverlay) {
+        db.staff.forEach(s => {
+          const wk = wKey(calYear, calMonth, s.id);
+          const w = db.wishes[wk] || {};
+          const wishDay = w[String(day)];
+          if (wishDay) {
+            cellHTML += `<div class="wish-dot" title="${s.name}の希望">${s.name.split(' ')[1]||s.name.split(' ')[0]} ${formatTime(wishDay)}</div>`;
+          }
+        });
+      }
+
+      dayShifts.forEach(s => {
+        const member = db.staff.find(m => m.id === s.staffId);
+        if (!member) return;
+        const c = COLORS[member.color % COLORS.length];
+        cellHTML += `<div class="shift-pill" style="background:${c.bg};color:${c.text};border:0.5px solid ${c.border}" onclick="event.stopPropagation();removeShift('${key}',${s.id})" title="${member.name} / クリックで削除">${member.name.split(' ')[1]||member.name.split(' ')[0]} ${timeLabel(s)}</div>`;
+      });
+      cellHTML += '</td>';
+      html += cellHTML;
+      day++;
+    }
+    if ((i+1) % 7 === 0) html += '</tr>';
+  }
+  document.getElementById('admin-cal-body').innerHTML = html;
+}
+
+function changeMonth(d) { calMonth += d; if(calMonth<0){calMonth=11;calYear--;}if(calMonth>11){calMonth=0;calYear++;} renderAdminCal(); }
+
+function toggleWishView() {
+  showWishOverlay = !showWishOverlay;
+  document.getElementById('wish-view-btn').textContent = showWishOverlay ? '希望シフトを隠す' : '希望シフトを表示';
+  renderAdminCal();
+}
+
+let modalShiftKey = null;
+function openAddShiftModal(day, key) {
+  modalShiftDate = day; modalShiftKey = key;
+  document.getElementById('modal-shift-title').textContent = `${calMonth+1}月${day}日 シフト追加`;
+  const dow = new Date(calYear, calMonth, day).getDay();
+  const already = (db.shifts[key] || []).map(s => s.staffId);
+  const available = db.staff.filter(s => s.days.includes(dow));
+  document.getElementById('modal-shift-staff').innerHTML = available.map(s =>
+    `<option value="${s.id}" ${already.includes(s.id)?'disabled':''}>
+      ${s.name} (${s.role})${already.includes(s.id)?' — 設定済':''}
+    </option>`).join('');
+  document.getElementById('modal-add-shift').style.display = 'flex';
+}
+
+function confirmAddShift() {
+  const sid = parseInt(document.getElementById('modal-shift-staff').value);
+  const start = document.getElementById('modal-shift-start').value;
+  const end = document.getElementById('modal-shift-end').value;
+  if (!sid || !start || !end) return;
+  if (!db.shifts[modalShiftKey]) db.shifts[modalShiftKey] = [];
+  db.shifts[modalShiftKey].push({id: nextId(), staffId: sid, start, end});
+  saveData(); closeModal('modal-add-shift'); renderAdminCal(); renderDashboard();
+}
+
+function setShiftPreset(s, e) {
+  document.getElementById('modal-shift-start').value = s;
+  document.getElementById('modal-shift-end').value = e;
+}
+
+function removeShift(key, id) {
+  db.shifts[key] = (db.shifts[key] || []).filter(s => s.id !== id);
+  saveData(); renderAdminCal(); renderDashboard();
+}
+
+function autoGenerate() {
+  const last = new Date(calYear, calMonth+1, 0).getDate();
+  const weekdayMin = parseInt(document.getElementById('rule-weekday-min').value) || 2;
+  const weekendMin = parseInt(document.getElementById('rule-weekend-min').value) || 3;
+  const wishPri = document.getElementById('rule-wish-priority').checked;
+  const timeSlots = [['08:00','13:00'],['11:00','16:00'],['16:00','21:00']];
+
+  for (let d = 1; d <= last; d++) {
+    const key = dKey(calYear, calMonth, d);
+    if (db.shifts[key] && db.shifts[key].length > 0) continue;
+    const dow = new Date(calYear, calMonth, d).getDay();
+    const isWeekend = dow === 0 || dow === 6;
+    const needed = isWeekend ? weekendMin : weekdayMin;
+
+    let pool = db.staff.filter(s => s.days.includes(dow));
+    if (wishPri) {
+      const wishers = pool.filter(s => { const w = db.wishes[wKey(calYear, calMonth, s.id)] || {}; return !!w[String(d)]; });
+      pool = [...wishers, ...pool.filter(s => !wishers.find(w => w.id === s.id))];
+    }
+    const picked = pool.slice(0, needed);
+    db.shifts[key] = picked.map((s, i) => {
+      const [start, end] = timeSlots[i % timeSlots.length];
+      return {id: nextId(), staffId: s.id, start, end};
+    });
+  }
+  saveData(); renderAdminCal(); renderDashboard();
+  alert(`${calYear}年${calMonth+1}月のシフトを自動生成しました！`);
+}
+
+function clearMonthShifts() {
+  if (!confirm('今月のシフトをすべてクリアしますか？')) return;
+  const prefix = `${calYear}-${String(calMonth+1).padStart(2,'0')}`;
+  Object.keys(db.shifts).forEach(k => { if (k.startsWith(prefix)) delete db.shifts[k]; });
+  saveData(); renderAdminCal(); renderDashboard();
+}
+
+function publishShifts() {
+  const prefix = `${calYear}-${String(calMonth+1).padStart(2,'0')}`;
+  db.published[prefix] = true;
+  saveData();
+  renderDashboard();
+  alert(`${calYear}年${calMonth+1}月のシフトを公開しました！スタッフが確認できます。`);
+  if (db.lineWebhook) sendLINENotify(`【シフト公開】${calYear}年${calMonth+1}月のシフトが公開されました。アプリでご確認ください。`);
+}
+
+function printCalendar() { window.print(); }
+
+// ══════════ STAFF MGMT ══════════
+function renderStaffMgmt() {
+  const daysJa = ['日','月','火','水','木','金','土'];
+  document.getElementById('staff-grid').innerHTML = db.staff.map(s => {
+    const c = COLORS[s.color % COLORS.length];
+    const init = s.name.replace(/\s/g,'').slice(0,2);
+    const days = daysJa.map((d,i) => `<div class="day-dot ${s.days.includes(i)?'on':''}" onclick="toggleStaffDay(${s.id},${i})">${d}</div>`).join('');
+    return `
+      <div class="staff-card">
+        <div class="staff-head">
+          <div class="staff-avatar" style="background:${c.bg};color:${c.text}">${init}</div>
+          <div class="staff-name-block"><div class="sname">${s.name}</div><div class="srole">${s.role}</div></div>
+        </div>
+        <div class="days-wrap">${days}</div>
+        <div class="pin-row">PIN: ${'•'.repeat(s.pin.length)}</div>
+        <div class="staff-card-actions">
+          <button class="btn btn-sm" onclick="editStaffPin(${s.id})">PIN変更</button>
+          <button class="btn btn-sm btn-red" onclick="removeStaff(${s.id})">削除</button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function toggleStaffDay(id, d) {
+  const s = db.staff.find(x => x.id === id);
+  if (!s) return;
+  const i = s.days.indexOf(d);
+  if (i >= 0) s.days.splice(i, 1); else s.days.push(d);
+  saveData(); renderStaffMgmt();
+}
+
+function editStaffPin(id) {
+  const pin = prompt('新しいPIN（4桁）を入力してください:');
+  if (!pin || pin.length !== 4 || !/^\d+$/.test(pin)) { alert('4桁の数字で入力してください'); return; }
+  const s = db.staff.find(x => x.id === id);
+  if (s) { s.pin = pin; saveData(); renderStaffMgmt(); }
+}
+
+function removeStaff(id) {
+  if (!confirm('このスタッフを削除しますか？')) return;
+  db.staff = db.staff.filter(s => s.id !== id);
+  saveData(); renderStaffMgmt(); renderDashboard();
+}
+
+let newStaffDays = [1,2,3,4,5];
+function openAddStaffModal() {
+  newStaffDays = [1,2,3,4,5];
+  document.getElementById('new-staff-name').value = '';
+  document.getElementById('new-staff-pin').value = '';
+  document.querySelectorAll('#new-staff-days .day-dot').forEach((el,i) => {
+    el.classList.toggle('on', [1,2,3,4,5].includes(i));
+  });
+  document.getElementById('modal-add-staff').style.display = 'flex';
+}
+
+function toggleNewDay(d) {
+  const el = document.querySelector(`#new-staff-days [data-d="${d}"]`);
+  const i = newStaffDays.indexOf(d);
+  if (i >= 0) { newStaffDays.splice(i,1); el.classList.remove('on'); }
+  else { newStaffDays.push(d); el.classList.add('on'); }
+}
+
+function confirmAddStaff() {
+  const name = document.getElementById('new-staff-name').value.trim();
+  const role = document.getElementById('new-staff-role').value;
+  const pin = document.getElementById('new-staff-pin').value || '0000';
+  if (!name) { alert('名前を入力してください'); return; }
+  db.staff.push({ id: nextId(), name, role, days: [...newStaffDays], color: db.staff.length % COLORS.length, pin });
+  saveData(); closeModal('modal-add-staff'); renderStaffMgmt(); renderDashboard();
+}
+
+// ══════════ WISH REVIEW (ADMIN) ══════════
+function renderWishReview() {
+  document.getElementById('wish-review-month').textContent = `${wishReviewYear}年 ${wishReviewMonth+1}月`;
+  const tbody = document.getElementById('wish-review-body');
+  if (db.staff.length === 0) { tbody.innerHTML = '<tr><td colspan="5" style="padding:16px;color:var(--text-hint)">スタッフがいません</td></tr>'; return; }
+  tbody.innerHTML = db.staff.map(s => {
+    const key = wKey(wishReviewYear, wishReviewMonth, s.id);
+    const w = db.wishes[key] || {};
+    const cnt = Object.keys(w).length;
+    const days = Object.entries(w).map(([d,v]) => `${d}日(${formatTime(v)})`).join(', ');
+    return `<tr>
+      <td style="font-weight:500">${s.name}</td>
+      <td><span class="badge badge-gray">${s.role}</span></td>
+      <td style="color:var(--text-sub);font-size:12px">${cnt > 0 ? '提出済' : '—'}</td>
+      <td>${cnt}日 <span style="font-size:11px;color:var(--text-hint)">${days}</span></td>
+      <td>${cnt>0?'<span class="badge badge-green">提出済</span>':'<span class="badge badge-amber">未提出</span>'}</td>
+    </tr>`;
+  }).join('');
+}
+
+function changeWishReviewMonth(d) {
+  wishReviewMonth += d;
+  if(wishReviewMonth<0){wishReviewMonth=11;wishReviewYear--;}
+  if(wishReviewMonth>11){wishReviewMonth=0;wishReviewYear++;}
+  renderWishReview();
+}
+
+// ══════════ STAFF CAL (MY SHIFT) ══════════
+function renderStaffCal() {
+  const prefix = `${staffCalYear}-${String(staffCalMonth+1).padStart(2,'0')}`;
+  const isPublished = !!db.published[prefix];
+  document.getElementById('staff-cal-month').textContent = `${staffCalYear}年 ${staffCalMonth+1}月`;
+  document.getElementById('staff-shift-status').innerHTML = isPublished
+    ? `<div class="alert-box alert-green">✓ ${staffCalYear}年${staffCalMonth+1}月のシフトが公開されています</div>`
+    : `<div class="alert-box alert-amber">⚠ ${staffCalYear}年${staffCalMonth+1}月のシフトはまだ公開されていません</div>`;
+
+  const first = new Date(staffCalYear, staffCalMonth, 1);
+  const last = new Date(staffCalYear, staffCalMonth+1, 0);
+  const startDay = first.getDay();
+  const today = new Date();
+  const cells = Math.ceil((startDay + last.getDate()) / 7) * 7;
+  let day = 1, html = '';
+  const wk = wKey(staffCalYear, staffCalMonth, currentUser.id);
+  const myWishes = db.wishes[wk] || {};
+
+  for (let i = 0; i < cells; i++) {
+    if (i % 7 === 0) html += '<tr>';
+    if (i < startDay || day > last.getDate()) {
+      html += '<td class="other-month"></td>';
+      if (i >= startDay) day++;
+    } else {
+      const dow = (startDay + day - 1) % 7;
+      const isToday = today.getFullYear()===staffCalYear && today.getMonth()===staffCalMonth && today.getDate()===day;
+      const key = dKey(staffCalYear, staffCalMonth, day);
+      const dayShifts = (db.shifts[key] || []).filter(s => s.staffId === currentUser.id);
+      const hasWish = !!myWishes[String(day)];
+      const d = day;
+      html += `<td style="cursor:default">`;
+      html += `<div class="day-num ${isToday?'today':''} ${dow===0?'sun':''} ${dow===6?'sat':''}">${day}</div>`;
+      if (hasWish && !isPublished) {
+        html += `<div class="wish-dot">${formatTime(myWishes[String(day)])}</div>`;
+      }
+      if (isPublished) {
+        dayShifts.forEach(s => {
+          const c = COLORS[currentUser.color % COLORS.length];
+          html += `<div class="shift-pill" style="background:${c.bg};color:${c.text};border:0.5px solid ${c.border}">${timeLabel(s)}</div>`;
+        });
+        if (dayShifts.length === 0 && hasWish) {
+          html += `<div style="font-size:10px;color:var(--text-hint);padding:2px">休み</div>`;
+        }
+      }
+      html += '</td>';
+      day++;
+    }
+    if ((i+1) % 7 === 0) html += '</tr>';
+  }
+  document.getElementById('staff-cal-body').innerHTML = html;
+}
+
+function changeStaffMonth(d) { staffCalMonth += d; if(staffCalMonth<0){staffCalMonth=11;staffCalYear--;}if(staffCalMonth>11){staffCalMonth=0;staffCalYear++;} renderStaffCal(); }
+
+// ══════════ WISH SUBMIT (STAFF) ══════════
+let pendingWishes = {};
+
+function renderWishSubmit() {
+  document.getElementById('wish-month-label').textContent = `${wishYear}年 ${wishMonth+1}月`;
+  const wk = wKey(wishYear, wishMonth, currentUser.id);
+  pendingWishes = JSON.parse(JSON.stringify(db.wishes[wk] || {}));
+  buildWishGrid();
+}
+
+function buildWishGrid() {
+  const first = new Date(wishYear, wishMonth, 1);
+  const last = new Date(wishYear, wishMonth+1, 0);
+  const startDay = first.getDay();
+  const cells = Math.ceil((startDay + last.getDate()) / 7) * 7;
+  const s = currentUser;
+  let html = '';
+
+  for (let i = 0; i < cells; i++) {
+    const day = i - startDay + 1;
+    if (i < startDay || day > last.getDate()) {
+      html += `<div class="wish-cell other-m"></div>`;
+    } else {
+      const dow = (startDay + day - 1) % 7;
+      const canWork = s.days.includes(dow);
+      const isSelected = !!pendingWishes[String(day)];
+      const startVal = isSelected ? (pendingWishes[String(day)].start || '10:00') : '10:00';
+      const endVal = isSelected ? (pendingWishes[String(day)].end || '17:00') : '17:00';
+      const dowClass = dow === 0 ? 'sun' : dow === 6 ? 'sat' : '';
+      if (!canWork) {
+        html += `<div class="wish-cell off-day"><div class="wish-day-num ${dowClass}">${day}</div><div style="font-size:9px;color:var(--text-hint);text-align:center">—</div></div>`;
+      } else {
+        html += `<div class="wish-cell ${isSelected?'selected':''}" id="wcell-${day}" onclick="toggleWishDay(${day},${dow})">
+          <div class="wish-day-num ${dowClass}">${day}</div>
+          <div class="wish-time-wrap">
+            <input type="time" class="wish-time-input" id="wstart-${day}" value="${startVal}" onchange="wishTimeChange(${day})" onclick="event.stopPropagation()" />
+            <input type="time" class="wish-time-input" id="wend-${day}" value="${endVal}" onchange="wishTimeChange(${day})" onclick="event.stopPropagation()" />
+          </div>
+          <div class="wish-preset-row">
+            <button class="wish-preset-btn" onclick="event.stopPropagation();setWishPreset(${day},'08:00','13:00')">朝</button>
+            <button class="wish-preset-btn" onclick="event.stopPropagation();setWishPreset(${day},'11:00','16:00')">昼</button>
+            <button class="wish-preset-btn" onclick="event.stopPropagation();setWishPreset(${day},'16:00','21:00')">夜</button>
+          </div>
+        </div>`;
+      }
+    }
+  }
+  document.getElementById('wish-grid').innerHTML = html;
+}
+
+function toggleWishDay(day, dow) {
+  if (pendingWishes[String(day)]) {
+    delete pendingWishes[String(day)];
+  } else {
+    pendingWishes[String(day)] = {start: '10:00', end: '17:00'};
+  }
+  buildWishGrid();
+}
+
+function wishTimeChange(day) {
+  const s = document.getElementById('wstart-'+day);
+  const e = document.getElementById('wend-'+day);
+  if (s && e) pendingWishes[String(day)] = {start: s.value, end: e.value};
+}
+
+function setWishPreset(day, start, end) {
+  pendingWishes[String(day)] = {start, end};
+  const s = document.getElementById('wstart-'+day);
+  const e = document.getElementById('wend-'+day);
+  if (s) s.value = start;
+  if (e) e.value = end;
+}
+
+function submitWishes() {
+  const wk = wKey(wishYear, wishMonth, currentUser.id);
+  db.wishes[wk] = JSON.parse(JSON.stringify(pendingWishes));
+  saveData();
+  document.getElementById('wish-submit-alert').style.display = 'flex';
+  setTimeout(() => document.getElementById('wish-submit-alert').style.display = 'none', 3000);
+}
+
+function clearWishes() { pendingWishes = {}; buildWishGrid(); }
+function changeWishMonth(d) { wishMonth += d; if(wishMonth<0){wishMonth=11;wishYear--;}if(wishMonth>11){wishMonth=0;wishYear++;} renderWishSubmit(); }
+
+// ══════════ SETTINGS ══════════
+function loadSettings() {
+  document.getElementById('line-webhook-input').value = db.lineWebhook || '';
+  document.getElementById('rule-weekday-min').value = db.rules.weekdayMin;
+  document.getElementById('rule-weekend-min').value = db.rules.weekendMin;
+  document.getElementById('rule-wish-priority').checked = db.rules.wishPriority;
+  updateLINEStatus();
+}
+
+function updateLINEStatus() {
+  const connected = !!db.lineWebhook;
+  document.getElementById('line-dot').className = 'line-dot' + (connected?' connected':'');
+  document.getElementById('line-status-text').textContent = connected ? '設定済' : '未設定';
+}
+
+function saveLINEWebhook() {
+  db.lineWebhook = document.getElementById('line-webhook-input').value.trim();
+  saveData(); updateLINEStatus();
+  alert('LINE通知設定を保存しました');
+}
+
+function testLINE() {
+  if (!db.lineWebhook) { alert('先にWebhook URLを保存してください'); return; }
+  sendLINENotify('【テスト】ShiftMgrからのテスト通知です。正常に設定されています。');
+}
+
+function sendLINENotify(msg) {
+  fetch(db.lineWebhook, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+    body: 'message=' + encodeURIComponent(msg)
+  }).then(() => alert('LINE通知を送信しました')).catch(() => alert('LINE通知の送信に失敗しました。Webhook URLを確認してください。'));
+}
+
+function saveRules() {
+  db.rules.weekdayMin = parseInt(document.getElementById('rule-weekday-min').value) || 2;
+  db.rules.weekendMin = parseInt(document.getElementById('rule-weekend-min').value) || 3;
+  db.rules.wishPriority = document.getElementById('rule-wish-priority').checked;
+  saveData(); alert('ルールを保存しました');
+}
+
+function changeAdminPIN() {
+  const pin = document.getElementById('new-admin-pin').value;
+  if (!pin || pin.length !== 4 || !/^\d+$/.test(pin)) { alert('4桁の数字で入力してください'); return; }
+  db.adminPin = pin; saveData(); alert('管理者PINを変更しました');
+  document.getElementById('new-admin-pin').value = '';
+}
+
+// ══════════ MODAL UTILS ══════════
+function closeModal(id) { document.getElementById(id).style.display = 'none'; }
+</script>
+</body>
+</html>
+
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;700&display=swap');
+
+  :root {
+    --green: #1D9E75;
+    --green-dark: #0F6E56;
+    --green-light: #E1F5EE;
+    --green-mid: #9FE1CB;
+    --amber: #EF9F27;
+    --amber-light: #FAEEDA;
+    --blue: #378ADD;
+    --blue-light: #E6F1FB;
+    --red: #E24B4A;
+    --red-light: #FCEBEB;
+    --gray-50: #F7F6F3;
+    --gray-100: #EDECEA;
+    --gray-200: #D3D1C7;
+    --gray-400: #888780;
+    --gray-600: #5F5E5A;
+    --gray-900: #1C1C1A;
+    --text: #1C1C1A;
+    --text-sub: #5F5E5A;
+    --text-hint: #888780;
+    --border: rgba(0,0,0,0.1);
+    --border-mid: rgba(0,0,0,0.18);
+    --surface: #fff;
+    --bg: #F7F6F3;
+    --radius: 10px;
+    --radius-lg: 14px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Noto Sans JP', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.6;
+    min-height: 100vh;
+  }
+
+  /* ── LOGIN ── */
+  #login-screen {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+    background: var(--bg);
+  }
+  .login-logo {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--green);
+    letter-spacing: -0.5px;
+    margin-bottom: 6px;
+  }
+  .login-sub {
+    font-size: 13px;
+    color: var(--text-sub);
+    margin-bottom: 2.5rem;
+  }
+  .login-card {
+    background: var(--surface);
+    border: 0.5px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 2rem;
+    width: 100%;
+    max-width: 380px;
+  }
+  .login-card h2 {
+    font-size: 15px;
+    font-weight: 500;
+    margin-bottom: 1.5rem;
+    color: var(--text);
+  }
+  .role-select {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 1.25rem;
+  }
+  .role-btn {
+    padding: 10px 8px;
+    border: 1.5px solid var(--border-mid);
+    border-radius: var(--radius);
+    background: none;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 13px;
+    color: var(--text-sub);
+    transition: all 0.15s;
+    text-align: center;
+  }
+  .role-btn.active {
+    border-color: var(--green);
+    background: var(--green-light);
+    color: var(--green-dark);
+    font-weight: 500;
+  }
+  .staff-select-wrap { display: none; margin-bottom: 1rem; }
+  .staff-select-wrap.visible { display: block; }
+  label.field-label {
+    display: block;
+    font-size: 12px;
+    color: var(--text-sub);
+    margin-bottom: 4px;
+  }
+  select, input[type="text"], input[type="password"], input[type="number"] {
+    width: 100%;
+    padding: 9px 12px;
+    border: 0.5px solid var(--border-mid);
+    border-radius: var(--radius);
+    font-family: inherit;
+    font-size: 14px;
+    background: var(--surface);
+    color: var(--text);
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  select:focus, input:focus { border-color: var(--green); }
+  .field-group { margin-bottom: 1rem; }
+  .pin-hint {
+    font-size: 11px;
+    color: var(--text-hint);
+    margin-top: 4px;
+  }
+  .btn-login {
+    width: 100%;
+    padding: 11px;
+    background: var(--green);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius);
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s;
+    margin-top: 0.5rem;
+  }
+  .btn-login:hover { background: var(--green-dark); }
+  .error-msg { color: var(--red); font-size: 12px; margin-top: 8px; display: none; }
+
+  /* ── MAIN APP ── */
+  #app { display: none; min-height: 100vh; }
+
+  .topbar {
+    background: var(--surface);
+    border-bottom: 0.5px solid var(--border);
+    padding: 0 1.5rem;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    z-index: 50;
+  }
+  .topbar-left { display: flex; align-items: center; gap: 12px; }
+  .topbar-logo { font-size: 16px; font-weight: 700; color: var(--green); }
+  .role-badge {
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 20px;
+    font-weight: 500;
+  }
+  .role-badge.admin { background: var(--amber-light); color: #854F0B; }
+  .role-badge.staff { background: var(--green-light); color: var(--green-dark); }
+  .topbar-right { display: flex; align-items: center; gap: 10px; }
+  .user-name { font-size: 13px; color: var(--text-sub); }
+  .btn-logout {
+    font-size: 12px;
+    padding: 5px 12px;
+    border: 0.5px solid var(--border-mid);
+    border-radius: var(--radius);
+    background: none;
+    cursor: pointer;
+    color: var(--text-sub);
+    font-family: inherit;
+  }
+  .btn-logout:hover { background: var(--gray-100); }
+
+  .nav-tabs {
+    background: var(--surface);
+    border-bottom: 0.5px solid var(--border);
+    padding: 0 1.5rem;
+    display: flex;
+    gap: 0;
+    overflow-x: auto;
+  }
+  .nav-tab {
+    padding: 12px 16px;
+    font-size: 13px;
+    color: var(--text-sub);
+    border: none;
+    background: none;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    white-space: nowrap;
+    font-family: inherit;
+    font-weight: 400;
+  }
+  .nav-tab.active {
+    color: var(--green-dark);
+    border-bottom-color: var(--green);
+    font-weight: 500;
+  }
+
+  .content { padding: 1.5rem; max-width: 1100px; margin: 0 auto; }
+
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  /* ── CARDS & BUTTONS ── */
+  .card {
+    background: var(--surface);
+    border: 0.5px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 1rem;
+  }
+  .card-title {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text);
+    margin-bottom: 1rem;
+  }
+  .btn {
+    padding: 8px 14px;
+    border-radius: var(--radius);
+    border: 0.5px solid var(--border-mid);
+    background: none;
+    font-size: 13px;
+    cursor: pointer;
+    color: var(--text);
+    font-family: inherit;
+    transition: all 0.12s;
+  }
+  .btn:hover { background: var(--gray-100); }
+  .btn-green { background: var(--green); color: #fff; border-color: var(--green); }
+  .btn-green:hover { background: var(--green-dark); }
+  .btn-amber { background: var(--amber); color: #fff; border-color: var(--amber); }
+  .btn-red { background: var(--red); color: #fff; border-color: var(--red); }
+  .btn-sm { padding: 5px 10px; font-size: 12px; }
+
+  /* ── STATS ── */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 10px;
+    margin-bottom: 1.25rem;
+  }
+  .stat-box {
+    background: var(--surface);
+    border: 0.5px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1rem;
+  }
+  .stat-label { font-size: 12px; color: var(--text-sub); margin-bottom: 4px; }
+  .stat-val { font-size: 24px; font-weight: 500; color: var(--text); }
+  .stat-sub { font-size: 11px; color: var(--text-hint); margin-top: 2px; }
+
+  /* ── CALENDAR ── */
+  .cal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .cal-nav { display: flex; align-items: center; gap: 10px; }
+  .cal-nav button {
+    background: none;
+    border: 0.5px solid var(--border-mid);
+    border-radius: var(--radius);
+    padding: 6px 12px;
+    cursor: pointer;
+    font-size: 14px;
+    color: var(--text);
+  }
+  .cal-nav button:hover { background: var(--gray-100); }
+  .cal-month { font-size: 16px; font-weight: 500; }
+  .cal-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+  table.cal {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    table-layout: fixed;
+  }
+  table.cal th {
+    padding: 6px 4px;
+    text-align: center;
+    color: var(--text-sub);
+    font-weight: 400;
+    border-bottom: 0.5px solid var(--border);
+    font-size: 12px;
+  }
+  table.cal td {
+    border: 0.5px solid var(--border);
+    vertical-align: top;
+    min-height: 80px;
+    padding: 4px;
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+  table.cal td:hover { background: var(--gray-50); }
+  table.cal td.other-month { background: var(--bg); cursor: default; }
+  table.cal td.other-month:hover { background: var(--bg); }
+  .day-num {
+    font-size: 12px;
+    color: var(--text-sub);
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 3px;
+    border-radius: 50%;
+  }
+  .day-num.today { background: var(--green); color: #fff; font-weight: 500; }
+  .day-num.sun { color: #E24B4A; }
+  .day-num.sat { color: #378ADD; }
+  .shift-pill {
+    font-size: 10px;
+    padding: 2px 5px;
+    border-radius: 20px;
+    margin-bottom: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: block;
+    cursor: pointer;
+  }
+  .wish-dot {
+    font-size: 10px;
+    padding: 2px 5px;
+    border-radius: 20px;
+    margin-bottom: 2px;
+    background: var(--amber-light);
+    color: #854F0B;
+    border: 0.5px solid #EF9F27;
+    display: block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* ── STAFF MANAGEMENT ── */
+  .staff-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+    gap: 10px;
+  }
+  .staff-card {
+    background: var(--surface);
+    border: 0.5px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 1rem 1.25rem;
+  }
+  .staff-avatar {
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    font-weight: 500;
+    flex-shrink: 0;
+  }
+  .staff-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .staff-name-block .sname { font-size: 14px; font-weight: 500; }
+  .staff-name-block .srole { font-size: 11px; color: var(--text-sub); margin-top: 1px; }
+  .days-wrap { display: flex; gap: 4px; margin-bottom: 8px; }
+  .day-dot {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    border: 0.5px solid var(--border-mid);
+    background: var(--gray-50);
+    color: var(--text-sub);
+    cursor: pointer;
+    user-select: none;
+  }
+  .day-dot.on { background: var(--green); border-color: var(--green); color: #fff; }
+  .pin-row { font-size: 11px; color: var(--text-hint); margin-top: 4px; }
+  .staff-card-actions { display: flex; gap: 6px; margin-top: 8px; }
+
+  /* ── WISH PANEL (STAFF) ── */
+  .month-wish-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 4px;
+    margin-bottom: 1rem;
+  }
+  .wish-day-header {
+    text-align: center;
+    font-size: 11px;
+    color: var(--text-sub);
+    padding: 4px 0;
+  }
+  .wish-cell {
+    border: 0.5px solid var(--border);
+    border-radius: 6px;
+    padding: 4px;
+    min-height: 60px;
+    cursor: pointer;
+    background: var(--surface);
+    transition: background 0.1s;
+  }
+  .wish-cell:hover { background: var(--gray-50); }
+  .wish-cell.selected { background: var(--green-light); border-color: var(--green-mid); }
+  .wish-cell.off-day { background: var(--bg); cursor: default; opacity: 0.5; }
+  .wish-cell.other-m { background: var(--bg); cursor: default; opacity: 0.3; }
+  .wish-day-num { font-size: 11px; color: var(--text-sub); text-align: center; margin-bottom: 3px; }
+  .wish-day-num.sun { color: var(--red); }
+  .wish-day-num.sat { color: var(--blue); }
+  .wish-time-select {
+    font-size: 10px;
+    width: 100%;
+    padding: 1px 2px;
+    border: 0.5px solid var(--border-mid);
+    border-radius: 4px;
+    background: var(--surface);
+    display: none;
+  }
+  .wish-cell.selected .wish-time-select { display: block; }
+
+  /* ── MODAL ── */
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 200;
+    padding: 1rem;
+  }
+  .modal-box {
+    background: var(--surface);
+    border-radius: var(--radius-lg);
+    border: 0.5px solid var(--border);
+    padding: 1.5rem;
+    width: 100%;
+    max-width: 420px;
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+  .modal-title { font-size: 15px; font-weight: 500; margin-bottom: 1.25rem; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 1.25rem; }
+
+  /* ── TAGS & BADGES ── */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 500;
+  }
+  .badge-green { background: var(--green-light); color: var(--green-dark); }
+  .badge-amber { background: var(--amber-light); color: #854F0B; }
+  .badge-red { background: var(--red-light); color: #A32D2D; }
+  .badge-blue { background: var(--blue-light); color: #185FA5; }
+  .badge-gray { background: var(--gray-100); color: var(--gray-600); }
+
+  /* ── WISH REVIEW (ADMIN) ── */
+  .wish-review-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .wish-review-table th {
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 0.5px solid var(--border);
+    color: var(--text-sub);
+    font-weight: 400;
+    font-size: 12px;
+  }
+  .wish-review-table td {
+    padding: 8px 10px;
+    border-bottom: 0.5px solid var(--border);
+    vertical-align: middle;
+  }
+  .wish-review-table tr:last-child td { border-bottom: none; }
+
+  /* ── SETTINGS ── */
+  .settings-section { margin-bottom: 1.5rem; }
+  .settings-section h3 { font-size: 13px; font-weight: 500; color: var(--text-sub); margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .setting-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 0.5px solid var(--border); }
+  .setting-row:last-child { border-bottom: none; }
+  .setting-label { font-size: 13px; color: var(--text); }
+  .setting-sub { font-size: 11px; color: var(--text-hint); margin-top: 2px; }
+  .setting-control { flex-shrink: 0; margin-left: 12px; }
+
+  /* ── LINE NOTIFY ── */
+  .line-status { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+  .line-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--gray-200); }
+  .line-dot.connected { background: var(--green); }
+
+  /* ── CONFIRM ALERT ── */
+  .alert-box {
+    padding: 12px 16px;
+    border-radius: var(--radius);
+    font-size: 13px;
+    margin-bottom: 1rem;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .alert-green { background: var(--green-light); color: var(--green-dark); border: 0.5px solid var(--green-mid); }
+  .alert-amber { background: var(--amber-light); color: #854F0B; border: 0.5px solid #EF9F27; }
+
+  .row-flex { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+  .gap8 { gap: 8px; }
+  .flex { display: flex; align-items: center; }
+
+  /* PDF print styles */
+  @media print {
+    #login-screen { display: none !important; }
+    .topbar, .nav-tabs, .cal-actions, .btn { display: none !important; }
+    .content { padding: 0; }
+    .card { border: 0.5px solid #ccc; }
+    body { background: white; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ══════════ LOGIN ══════════ -->
+<div id="login-screen">
+  <div class="login-logo">ShiftMgr</div>
+  <div class="login-sub">飲食店向けシフト管理システム</div>
+  <div class="login-card">
+    <h2>ログイン</h2>
+    <div class="field-group">
+      <label class="field-label">役割を選択</label>
+      <div class="role-select">
+        <button class="role-btn active" onclick="selectRole('admin')" id="role-admin">管理者<br><span style="font-size:10px;font-weight:300">店長・料理長</span></button>
+        <button class="role-btn" onclick="selectRole('staff')" id="role-staff">スタッフ<br><span style="font-size:10px;font-weight:300">アルバイト・パート</span></button>
+      </div>
+    </div>
+    <div class="staff-select-wrap field-group" id="staff-select-wrap">
+      <label class="field-label">名前を選択</label>
+      <select id="login-staff-select"></select>
+    </div>
+    <div class="field-group">
+      <label class="field-label">PINコード</label>
+      <input type="password" id="login-pin" maxlength="4" placeholder="4桁のPIN" />
+      <div class="pin-hint">管理者PIN: 1234 ／ スタッフPIN: 各自の4桁（初期: 0000）</div>
+    </div>
+    <button class="btn-login" onclick="doLogin()">ログイン</button>
+    <div class="error-msg" id="login-error">PINが正しくありません</div>
+  </div>
+</div>
+
+<!-- ══════════ APP ══════════ -->
+<div id="app">
+  <div class="topbar">
+    <div class="topbar-left">
+      <span class="topbar-logo">ShiftMgr</span>
+      <span class="role-badge" id="role-badge"></span>
+    </div>
+    <div class="topbar-right">
+      <span class="user-name" id="user-name-display"></span>
+      <button class="btn-logout" onclick="doLogout()">ログアウト</button>
+    </div>
+  </div>
+
+  <div class="nav-tabs" id="nav-tabs"></div>
+
+  <div class="content">
+    <!-- ADMIN PANELS -->
+    <div class="panel" id="panel-dashboard">
+      <div class="stats-grid" id="dash-stats"></div>
+      <div class="card">
+        <div class="card-title">希望シフト提出状況（今月）</div>
+        <div id="wish-summary-list"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">直近のお知らせ</div>
+        <div id="notice-list" style="font-size:13px;color:var(--text-sub)">シフトを自動生成・公開するとスタッフに通知されます。</div>
+      </div>
+    </div>
+
+    <div class="panel" id="panel-calendar">
+      <div class="cal-header">
+        <div class="cal-nav">
+          <button onclick="changeMonth(-1)">‹</button>
+          <span class="cal-month" id="cal-month-label"></span>
+          <button onclick="changeMonth(1)">›</button>
+        </div>
+        <div class="cal-actions">
+          <button class="btn" onclick="toggleWishView()" id="wish-view-btn">希望シフトを表示</button>
+          <button class="btn btn-green" onclick="autoGenerate()">自動生成</button>
+          <button class="btn" onclick="clearMonthShifts()">クリア</button>
+          <button class="btn btn-amber" onclick="publishShifts()">スタッフに公開</button>
+          <button class="btn" onclick="printCalendar()">印刷 / PDF</button>
+        </div>
+      </div>
+      <div class="card" style="padding:0.75rem">
+        <table class="cal" id="admin-cal">
+          <thead>
+            <tr><th>日</th><th>月</th><th>火</th><th>水</th><th>木</th><th>金</th><th>土</th></tr>
+          </thead>
+          <tbody id="admin-cal-body"></tbody>
+        </table>
+      </div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:8px;font-size:12px;color:var(--text-sub)">
+        <span>● クリックでシフト追加</span>
+        <span>● シフトをクリックで削除</span>
+        <span style="color:#854F0B">● 黄色 = 希望シフト</span>
+      </div>
+    </div>
+
+    <div class="panel" id="panel-staff-mgmt">
+      <div class="row-flex" style="margin-bottom:1rem">
+        <span style="color:var(--text-sub);font-size:13px">スタッフ一覧 — 勤務可能曜日・PINを管理</span>
+        <button class="btn btn-green" onclick="openAddStaffModal()">＋ スタッフ追加</button>
+      </div>
+      <div class="staff-grid" id="staff-grid"></div>
+    </div>
+
+    <div class="panel" id="panel-wish-review">
+      <div class="row-flex" style="margin-bottom:1rem">
+        <span style="font-weight:500">希望シフト一覧</span>
+        <div class="cal-nav">
+          <button onclick="changeWishReviewMonth(-1)">‹</button>
+          <span id="wish-review-month"></span>
+          <button onclick="changeWishReviewMonth(1)">›</button>
+        </div>
+      </div>
+      <div class="card" style="padding:0">
+        <div style="overflow-x:auto">
+          <table class="wish-review-table" id="wish-review-table">
+            <thead><tr><th>スタッフ</th><th>役職</th><th>提出日</th><th>希望日数</th><th>状態</th></tr></thead>
+            <tbody id="wish-review-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" id="panel-settings">
+      <div class="card">
+        <div class="settings-section">
+          <h3>LINE通知設定</h3>
+          <div class="setting-row">
+            <div>
+              <div class="setting-label">LINE Notify Webhook URL</div>
+              <div class="setting-sub">シフト公開時にLINEグループへ通知されます</div>
+            </div>
+            <div class="setting-control" style="display:flex;gap:8px;align-items:center">
+              <div class="line-status" id="line-status-badge">
+                <div class="line-dot" id="line-dot"></div>
+                <span id="line-status-text">未設定</span>
+              </div>
+            </div>
+          </div>
+          <div style="margin-top:10px;display:flex;gap:8px">
+            <input type="text" id="line-webhook-input" placeholder="https://notify-api.line.me/api/notify または Webhook URL" style="flex:1" />
+            <button class="btn btn-green" onclick="saveLINEWebhook()">保存</button>
+            <button class="btn" onclick="testLINE()">テスト送信</button>
+          </div>
+        </div>
+        <div class="settings-section">
+          <h3>シフト自動生成ルール</h3>
+          <div class="setting-row">
+            <div>
+              <div class="setting-label">平日最低スタッフ数</div>
+            </div>
+            <div class="setting-control">
+              <input type="number" id="rule-weekday-min" value="2" min="1" max="10" style="width:70px" />
+            </div>
+          </div>
+          <div class="setting-row">
+            <div>
+              <div class="setting-label">土日最低スタッフ数</div>
+            </div>
+            <div class="setting-control">
+              <input type="number" id="rule-weekend-min" value="3" min="1" max="10" style="width:70px" />
+            </div>
+          </div>
+          <div class="setting-row">
+            <div>
+              <div class="setting-label">希望シフトを優先する</div>
+              <div class="setting-sub">ONにすると希望提出済みの日を自動生成時に優先</div>
+            </div>
+            <div class="setting-control">
+              <input type="checkbox" id="rule-wish-priority" checked style="width:auto" />
+            </div>
+          </div>
+          <div style="margin-top:10px">
+            <button class="btn btn-green" onclick="saveRules()">ルールを保存</button>
+          </div>
+        </div>
+        <div class="settings-section">
+          <h3>管理者PINの変更</h3>
+          <div style="display:flex;gap:8px;margin-top:6px">
+            <input type="password" id="new-admin-pin" placeholder="新しいPIN（4桁）" maxlength="4" style="width:180px" />
+            <button class="btn" onclick="changeAdminPIN()">変更</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- STAFF PANELS -->
+    <div class="panel" id="panel-my-shift">
+      <div class="cal-header">
+        <div class="cal-nav">
+          <button onclick="changeStaffMonth(-1)">‹</button>
+          <span class="cal-month" id="staff-cal-month"></span>
+          <button onclick="changeStaffMonth(1)">›</button>
+        </div>
+      </div>
+      <div id="staff-shift-status" style="margin-bottom:1rem"></div>
+      <div class="card" style="padding:0.75rem">
+        <table class="cal" id="staff-cal">
+          <thead>
+            <tr><th>日</th><th>月</th><th>火</th><th>水</th><th>木</th><th>金</th><th>土</th></tr>
+          </thead>
+          <tbody id="staff-cal-body"></tbody>
+        </table>
+      </div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:8px;font-size:12px;color:var(--text-sub)">
+        <span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;border-radius:3px;background:var(--green-light);border:0.5px solid var(--green-mid);display:inline-block"></span> 自分のシフト</span>
+        <span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;border-radius:3px;background:var(--amber-light);border:0.5px solid #EF9F27;display:inline-block"></span> 希望提出済み</span>
+      </div>
+    </div>
+
+    <div class="panel" id="panel-wish-submit">
+      <div class="cal-header">
+        <div class="cal-nav">
+          <button onclick="changeWishMonth(-1)">‹</button>
+          <span class="cal-month" id="wish-month-label"></span>
+          <button onclick="changeWishMonth(1)">›</button>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-green" onclick="submitWishes()">希望を提出する</button>
+          <button class="btn" onclick="clearWishes()">クリア</button>
+        </div>
+      </div>
+      <div id="wish-submit-alert" style="display:none" class="alert-box alert-green">
+        ✓ 希望シフトを提出しました。店長の確認をお待ちください。
+      </div>
+      <div style="font-size:12px;color:var(--text-sub);margin-bottom:0.75rem">
+        希望する日付をクリックして時間帯を選んでください。日曜・土曜は赤・青で表示されます。
+      </div>
+      <div class="card" style="padding:0.75rem">
+        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-bottom:3px">
+          <div class="wish-day-header" style="color:var(--red)">日</div>
+          <div class="wish-day-header">月</div>
+          <div class="wish-day-header">火</div>
+          <div class="wish-day-header">水</div>
+          <div class="wish-day-header">木</div>
+          <div class="wish-day-header">金</div>
+          <div class="wish-day-header" style="color:var(--blue)">土</div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px" id="wish-grid"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ MODALS ══════════ -->
+<div class="modal-backdrop" id="modal-add-shift" style="display:none" onclick="if(event.target===this)closeModal('modal-add-shift')">
+  <div class="modal-box">
+    <div class="modal-title" id="modal-shift-title">シフト追加</div>
+    <div class="field-group">
+      <label class="field-label">スタッフ</label>
+      <select id="modal-shift-staff"></select>
+    </div>
+    <div class="field-group">
+      <label class="field-label">時間帯</label>
+      <select id="modal-shift-time">
+        <option value="morning">モーニング 08:00–13:00</option>
+        <option value="lunch">ランチ 11:00–16:00</option>
+        <option value="dinner">ディナー 17:00–22:00</option>
+        <option value="full">フルタイム 10:00–20:00</option>
+      </select>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal('modal-add-shift')">キャンセル</button>
+      <button class="btn btn-green" onclick="confirmAddShift()">追加</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="modal-add-staff" style="display:none" onclick="if(event.target===this)closeModal('modal-add-staff')">
+  <div class="modal-box">
+    <div class="modal-title">スタッフ追加</div>
+    <div class="field-group">
+      <label class="field-label">名前</label>
+      <input type="text" id="new-staff-name" placeholder="例: 田中 花子" />
+    </div>
+    <div class="field-group">
+      <label class="field-label">役職</label>
+      <select id="new-staff-role">
+        <option value="ホール">ホール</option>
+        <option value="キッチン">キッチン</option>
+        <option value="バリスタ">バリスタ</option>
+        <option value="店長">店長</option>
+        <option value="料理長">料理長</option>
+      </select>
+    </div>
+    <div class="field-group">
+      <label class="field-label">勤務可能曜日</label>
+      <div style="display:flex;gap:6px;margin-top:4px" id="new-staff-days">
+        <div class="day-dot" data-d="0" onclick="toggleNewDay(0)">日</div>
+        <div class="day-dot on" data-d="1" onclick="toggleNewDay(1)">月</div>
+        <div class="day-dot on" data-d="2" onclick="toggleNewDay(2)">火</div>
+        <div class="day-dot on" data-d="3" onclick="toggleNewDay(3)">水</div>
+        <div class="day-dot on" data-d="4" onclick="toggleNewDay(4)">木</div>
+        <div class="day-dot on" data-d="5" onclick="toggleNewDay(5)">金</div>
+        <div class="day-dot" data-d="6" onclick="toggleNewDay(6)">土</div>
+      </div>
+    </div>
+    <div class="field-group">
+      <label class="field-label">PINコード（4桁）</label>
+      <input type="password" id="new-staff-pin" placeholder="0000" maxlength="4" />
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal('modal-add-staff')">キャンセル</button>
+      <button class="btn btn-green" onclick="confirmAddStaff()">追加</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ══════════ DATA STORE ══════════
+const STORE_KEY = 'shiftmgr_v2';
+const TIME_LABELS = { morning:'08–13時', lunch:'11–16時', dinner:'17–22時', full:'10–20時' };
+const COLORS = [
+  {bg:'#E1F5EE',text:'#0F6E56',border:'#1D9E75'},
+  {bg:'#E6F1FB',text:'#185FA5',border:'#378ADD'},
+  {bg:'#FAEEDA',text:'#854F0B',border:'#EF9F27'},
+  {bg:'#FBEAF0',text:'#993556',border:'#D4537E'},
+  {bg:'#EEEDFE',text:'#534AB7',border:'#7F77DD'},
+  {bg:'#FAECE7',text:'#993C1D',border:'#D85A30'},
+  {bg:'#EAF3DE',text:'#3B6D11',border:'#639922'},
+];
+
+function loadData() {
+  try { return JSON.parse(localStorage.getItem(STORE_KEY)) || defaultData(); }
+  catch { return defaultData(); }
+}
+function saveData() { localStorage.setItem(STORE_KEY, JSON.stringify(db)); }
+
+function defaultData() {
+  return {
+    adminPin: '1234',
+    lineWebhook: '',
+    rules: { weekdayMin: 2, weekendMin: 3, wishPriority: true },
+    staff: [
+      {id:1, name:'田中 葵', role:'ホール', days:[1,2,3,4,5], color:0, pin:'0000'},
+      {id:2, name:'山本 拓海', role:'キッチン', days:[0,1,3,5,6], color:1, pin:'0000'},
+      {id:3, name:'佐藤 彩乃', role:'ホール', days:[2,3,4,5,6], color:2, pin:'0000'},
+      {id:4, name:'鈴木 蓮', role:'キッチン', days:[0,1,2,4,6], color:3, pin:'0000'},
+      {id:5, name:'高橋 凛', role:'バリスタ', days:[1,2,3,5,6], color:4, pin:'0000'},
+      {id:6, name:'中村 悠斗', role:'ホール', days:[0,3,4,5,6], color:5, pin:'0000'},
+    ],
+    shifts: {},
+    wishes: {},
+    published: {},
+    notices: [],
+    idCounter: 100,
+  };
+}
+
+let db = loadData();
+let currentUser = null;
+let isAdmin = false;
+
+// ── Calendar state ──
+let calYear = new Date().getFullYear();
+let calMonth = new Date().getMonth();
+let staffCalYear = new Date().getFullYear();
+let staffCalMonth = new Date().getMonth();
+let wishYear = new Date().getFullYear();
+let wishMonth = new Date().getMonth() + 1 <= 12 ? new Date().getMonth() + 1 : 0;
+let wishReviewYear = new Date().getFullYear();
+let wishReviewMonth = new Date().getMonth();
+let showWishOverlay = false;
+let modalShiftDate = null;
+let shiftIdCounter = 2000;
+
+function nextId() { return db.idCounter++; }
+
+// ══════════ LOGIN ══════════
+function selectRole(role) {
+  document.getElementById('role-admin').classList.toggle('active', role === 'admin');
+  document.getElementById('role-staff').classList.toggle('active', role === 'staff');
+  document.getElementById('staff-select-wrap').classList.toggle('visible', role === 'staff');
+  if (role === 'staff') {
+    const sel = document.getElementById('login-staff-select');
+    sel.innerHTML = db.staff.map(s => `<option value="${s.id}">${s.name} (${s.role})</option>`).join('');
+  }
+}
+
+function doLogin() {
+  const pin = document.getElementById('login-pin').value;
+  const err = document.getElementById('login-error');
+  const isStaffMode = document.getElementById('role-staff').classList.contains('active');
+  if (isStaffMode) {
+    const sid = parseInt(document.getElementById('login-staff-select').value);
+    const member = db.staff.find(s => s.id === sid);
+    if (!member || pin !== member.pin) { err.style.display = 'block'; return; }
+    currentUser = member;
+    isAdmin = false;
+  } else {
+    if (pin !== db.adminPin) { err.style.display = 'block'; return; }
+    currentUser = {id: 0, name: '管理者', role: '店長・料理長'};
+    isAdmin = true;
+  }
+  err.style.display = 'none';
+  document.getElementById('login-pin').value = '';
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+  initApp();
+}
+
+function doLogout() {
+  currentUser = null;
+  isAdmin = false;
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('login-screen').style.display = 'flex';
+  document.getElementById('login-pin').value = '';
+}
+
+// ══════════ APP INIT ══════════
+function initApp() {
+  document.getElementById('user-name-display').textContent = currentUser.name;
+  const badge = document.getElementById('role-badge');
+  badge.textContent = isAdmin ? '管理者' : 'スタッフ';
+  badge.className = 'role-badge ' + (isAdmin ? 'admin' : 'staff');
+
+  const tabs = document.getElementById('nav-tabs');
+  if (isAdmin) {
+    tabs.innerHTML = `
+      <button class="nav-tab active" onclick="showPanel('dashboard',this)">ダッシュボード</button>
+      <button class="nav-tab" onclick="showPanel('calendar',this)">シフトカレンダー</button>
+      <button class="nav-tab" onclick="showPanel('wish-review',this)">希望シフト確認</button>
+      <button class="nav-tab" onclick="showPanel('staff-mgmt',this)">スタッフ管理</button>
+      <button class="nav-tab" onclick="showPanel('settings',this)">設定</button>
+    `;
+    renderDashboard();
+    renderAdminCal();
+    renderStaffMgmt();
+    renderWishReview();
+    loadSettings();
+  } else {
+    tabs.innerHTML = `
+      <button class="nav-tab active" onclick="showPanel('my-shift',this)">確定シフト</button>
+      <button class="nav-tab" onclick="showPanel('wish-submit',this)">希望シフト提出</button>
+    `;
+    renderStaffCal();
+    renderWishSubmit();
+  }
+}
+
+function showPanel(id, btn) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('panel-' + id).classList.add('active');
+  if (btn) btn.classList.add('active');
+}
+
+// ══════════ DASHBOARD ══════════
+function renderDashboard() {
+  const today = new Date();
+  const y = today.getFullYear(), m = today.getMonth();
+  const prefix = `${y}-${String(m+1).padStart(2,'0')}`;
+  let totalShifts = 0;
+  const staffOnShift = new Set();
+  Object.keys(db.shifts).forEach(k => {
+    if (k.startsWith(prefix)) {
+      db.shifts[k].forEach(s => { totalShifts++; staffOnShift.add(s.staffId); });
+    }
+  });
+  const wishCount = db.staff.filter(s => {
+    const key = `${y}-${String(m+1).padStart(2,'0')}-${s.id}`;
+    return db.wishes[key] && Object.keys(db.wishes[key]).length > 0;
+  }).length;
+  const isPublished = !!db.published[prefix];
+
+  document.getElementById('dash-stats').innerHTML = `
+    <div class="stat-box"><div class="stat-label">今月のシフト数</div><div class="stat-val">${totalShifts}</div></div>
+    <div class="stat-box"><div class="stat-label">参加スタッフ</div><div class="stat-val">${staffOnShift.size}<span style="font-size:16px;font-weight:400"> / ${db.staff.length}名</span></div></div>
+    <div class="stat-box"><div class="stat-label">希望提出済み</div><div class="stat-val">${wishCount}<span style="font-size:16px;font-weight:400"> / ${db.staff.length}名</span></div></div>
+    <div class="stat-box"><div class="stat-label">シフト公開状況</div><div class="stat-val" style="font-size:15px;margin-top:4px"><span class="badge ${isPublished?'badge-green':'badge-amber'}">${isPublished?'公開中':'未公開'}</span></div></div>
+  `;
+
+  const wl = document.getElementById('wish-summary-list');
+  if (db.staff.length === 0) { wl.innerHTML = '<div style="color:var(--text-hint);font-size:13px">スタッフがいません</div>'; return; }
+  wl.innerHTML = `<table class="wish-review-table"><thead><tr><th>名前</th><th>役職</th><th>希望日数</th><th>状態</th></tr></thead><tbody>` +
+    db.staff.map(s => {
+      const key = `${y}-${String(m+1).padStart(2,'0')}-${s.id}`;
+      const w = db.wishes[key] || {};
+      const cnt = Object.keys(w).length;
+      return `<tr><td>${s.name}</td><td><span class="badge badge-gray">${s.role}</span></td><td>${cnt}日</td><td>${cnt > 0 ? '<span class="badge badge-green">提出済</span>' : '<span class="badge badge-amber">未提出</span>'}</td></tr>`;
+    }).join('') + '</tbody></table>';
+}
+
+// ══════════ ADMIN CALENDAR ══════════
+function dKey(y, m, d) { return `${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`; }
+function wKey(y, m, sid) { return `${y}-${String(m+1).padStart(2,'0')}-${sid}`; }
+
+function renderAdminCal() {
+  document.getElementById('cal-month-label').textContent = `${calYear}年 ${calMonth+1}月`;
+  const first = new Date(calYear, calMonth, 1);
+  const last = new Date(calYear, calMonth+1, 0);
+  const startDay = first.getDay();
+  const today = new Date();
+  const cells = Math.ceil((startDay + last.getDate()) / 7) * 7;
+  let day = 1, html = '';
+
+  for (let i = 0; i < cells; i++) {
+    if (i % 7 === 0) html += '<tr>';
+    if (i < startDay || day > last.getDate()) {
+      html += '<td class="other-month"></td>';
+      if (i >= startDay) day++;
+    } else {
+      const dow = (startDay + day - 1) % 7;
+      const isToday = today.getFullYear()===calYear && today.getMonth()===calMonth && today.getDate()===day;
+      const key = dKey(calYear, calMonth, day);
+      const dayShifts = db.shifts[key] || [];
+      const d = day;
+      let cellHTML = `<td onclick="openAddShiftModal(${d},'${key}')">`;
+      cellHTML += `<div class="day-num ${isToday?'today':''} ${dow===0?'sun':''} ${dow===6?'sat':''}">${day}</div>`;
+
+      if (showWishOverlay) {
+        db.staff.forEach(s => {
+          const wk = wKey(calYear, calMonth, s.id);
+          const w = db.wishes[wk] || {};
+          const wishDay = w[String(day)];
+          if (wishDay) {
+            cellHTML += `<div class="wish-dot" title="${s.name}の希望">${s.name.split(' ')[1]||s.name.split(' ')[0]} ${TIME_LABELS[wishDay.time]||''}</div>`;
+          }
+        });
+      }
+
+      dayShifts.forEach(s => {
+        const member = db.staff.find(m => m.id === s.staffId);
+        if (!member) return;
+        const c = COLORS[member.color % COLORS.length];
+        cellHTML += `<div class="shift-pill" style="background:${c.bg};color:${c.text};border:0.5px solid ${c.border}" onclick="event.stopPropagation();removeShift('${key}',${s.id})" title="${member.name} / クリックで削除">${member.name.split(' ')[1]||member.name.split(' ')[0]} ${TIME_LABELS[s.time]}</div>`;
+      });
+      cellHTML += '</td>';
+      html += cellHTML;
+      day++;
+    }
+    if ((i+1) % 7 === 0) html += '</tr>';
+  }
+  document.getElementById('admin-cal-body').innerHTML = html;
+}
+
+function changeMonth(d) { calMonth += d; if(calMonth<0){calMonth=11;calYear--;}if(calMonth>11){calMonth=0;calYear++;} renderAdminCal(); }
+
+function toggleWishView() {
+  showWishOverlay = !showWishOverlay;
+  document.getElementById('wish-view-btn').textContent = showWishOverlay ? '希望シフトを隠す' : '希望シフトを表示';
+  renderAdminCal();
+}
+
+let modalShiftKey = null;
+function openAddShiftModal(day, key) {
+  modalShiftDate = day; modalShiftKey = key;
+  document.getElementById('modal-shift-title').textContent = `${calMonth+1}月${day}日 シフト追加`;
+  const dow = new Date(calYear, calMonth, day).getDay();
+  const already = (db.shifts[key] || []).map(s => s.staffId);
+  const available = db.staff.filter(s => s.days.includes(dow));
+  document.getElementById('modal-shift-staff').innerHTML = available.map(s =>
+    `<option value="${s.id}" ${already.includes(s.id)?'disabled':''}>
+      ${s.name} (${s.role})${already.includes(s.id)?' — 設定済':''}
+    </option>`).join('');
+  document.getElementById('modal-add-shift').style.display = 'flex';
+}
+
+function confirmAddShift() {
+  const sid = parseInt(document.getElementById('modal-shift-staff').value);
+  const time = document.getElementById('modal-shift-time').value;
+  if (!db.shifts[modalShiftKey]) db.shifts[modalShiftKey] = [];
+  db.shifts[modalShiftKey].push({id: nextId(), staffId: sid, time});
+  saveData(); closeModal('modal-add-shift'); renderAdminCal(); renderDashboard();
+}
+
+function removeShift(key, id) {
+  db.shifts[key] = (db.shifts[key] || []).filter(s => s.id !== id);
+  saveData(); renderAdminCal(); renderDashboard();
+}
+
+function autoGenerate() {
+  const last = new Date(calYear, calMonth+1, 0).getDate();
+  const weekdayMin = parseInt(document.getElementById('rule-weekday-min').value) || 2;
+  const weekendMin = parseInt(document.getElementById('rule-weekend-min').value) || 3;
+  const wishPri = document.getElementById('rule-wish-priority').checked;
+  const times = ['morning','lunch','dinner'];
+
+  for (let d = 1; d <= last; d++) {
+    const key = dKey(calYear, calMonth, d);
+    if (db.shifts[key] && db.shifts[key].length > 0) continue;
+    const dow = new Date(calYear, calMonth, d).getDay();
+    const isWeekend = dow === 0 || dow === 6;
+    const needed = isWeekend ? weekendMin : weekdayMin;
+
+    let pool = db.staff.filter(s => s.days.includes(dow));
+    if (wishPri) {
+      const wishers = pool.filter(s => { const w = db.wishes[wKey(calYear, calMonth, s.id)] || {}; return !!w[String(d)]; });
+      pool = [...wishers, ...pool.filter(s => !wishers.find(w => w.id === s.id))];
+    }
+    const picked = pool.slice(0, needed);
+    db.shifts[key] = picked.map((s, i) => ({id: nextId(), staffId: s.id, time: times[i % times.length]}));
+  }
+  saveData(); renderAdminCal(); renderDashboard();
+  alert(`${calYear}年${calMonth+1}月のシフトを自動生成しました！`);
+}
+
+function clearMonthShifts() {
+  if (!confirm('今月のシフトをすべてクリアしますか？')) return;
+  const prefix = `${calYear}-${String(calMonth+1).padStart(2,'0')}`;
+  Object.keys(db.shifts).forEach(k => { if (k.startsWith(prefix)) delete db.shifts[k]; });
+  saveData(); renderAdminCal(); renderDashboard();
+}
+
+function publishShifts() {
+  const prefix = `${calYear}-${String(calMonth+1).padStart(2,'0')}`;
+  db.published[prefix] = true;
+  saveData();
+  renderDashboard();
+  alert(`${calYear}年${calMonth+1}月のシフトを公開しました！スタッフが確認できます。`);
+  if (db.lineWebhook) sendLINENotify(`【シフト公開】${calYear}年${calMonth+1}月のシフトが公開されました。アプリでご確認ください。`);
+}
+
+function printCalendar() { window.print(); }
+
+// ══════════ STAFF MGMT ══════════
+function renderStaffMgmt() {
+  const daysJa = ['日','月','火','水','木','金','土'];
+  document.getElementById('staff-grid').innerHTML = db.staff.map(s => {
+    const c = COLORS[s.color % COLORS.length];
+    const init = s.name.replace(/\s/g,'').slice(0,2);
+    const days = daysJa.map((d,i) => `<div class="day-dot ${s.days.includes(i)?'on':''}" onclick="toggleStaffDay(${s.id},${i})">${d}</div>`).join('');
+    return `
+      <div class="staff-card">
+        <div class="staff-head">
+          <div class="staff-avatar" style="background:${c.bg};color:${c.text}">${init}</div>
+          <div class="staff-name-block"><div class="sname">${s.name}</div><div class="srole">${s.role}</div></div>
+        </div>
+        <div class="days-wrap">${days}</div>
+        <div class="pin-row">PIN: ${'•'.repeat(s.pin.length)}</div>
+        <div class="staff-card-actions">
+          <button class="btn btn-sm" onclick="editStaffPin(${s.id})">PIN変更</button>
+          <button class="btn btn-sm btn-red" onclick="removeStaff(${s.id})">削除</button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function toggleStaffDay(id, d) {
+  const s = db.staff.find(x => x.id === id);
+  if (!s) return;
+  const i = s.days.indexOf(d);
+  if (i >= 0) s.days.splice(i, 1); else s.days.push(d);
+  saveData(); renderStaffMgmt();
+}
+
+function editStaffPin(id) {
+  const pin = prompt('新しいPIN（4桁）を入力してください:');
+  if (!pin || pin.length !== 4 || !/^\d+$/.test(pin)) { alert('4桁の数字で入力してください'); return; }
+  const s = db.staff.find(x => x.id === id);
+  if (s) { s.pin = pin; saveData(); renderStaffMgmt(); }
+}
+
+function removeStaff(id) {
+  if (!confirm('このスタッフを削除しますか？')) return;
+  db.staff = db.staff.filter(s => s.id !== id);
+  saveData(); renderStaffMgmt(); renderDashboard();
+}
+
+let newStaffDays = [1,2,3,4,5];
+function openAddStaffModal() {
+  newStaffDays = [1,2,3,4,5];
+  document.getElementById('new-staff-name').value = '';
+  document.getElementById('new-staff-pin').value = '';
+  document.querySelectorAll('#new-staff-days .day-dot').forEach((el,i) => {
+    el.classList.toggle('on', [1,2,3,4,5].includes(i));
+  });
+  document.getElementById('modal-add-staff').style.display = 'flex';
+}
+
+function toggleNewDay(d) {
+  const el = document.querySelector(`#new-staff-days [data-d="${d}"]`);
+  const i = newStaffDays.indexOf(d);
+  if (i >= 0) { newStaffDays.splice(i,1); el.classList.remove('on'); }
+  else { newStaffDays.push(d); el.classList.add('on'); }
+}
+
+function confirmAddStaff() {
+  const name = document.getElementById('new-staff-name').value.trim();
+  const role = document.getElementById('new-staff-role').value;
+  const pin = document.getElementById('new-staff-pin').value || '0000';
+  if (!name) { alert('名前を入力してください'); return; }
+  db.staff.push({ id: nextId(), name, role, days: [...newStaffDays], color: db.staff.length % COLORS.length, pin });
+  saveData(); closeModal('modal-add-staff'); renderStaffMgmt(); renderDashboard();
+}
+
+// ══════════ WISH REVIEW (ADMIN) ══════════
+function renderWishReview() {
+  document.getElementById('wish-review-month').textContent = `${wishReviewYear}年 ${wishReviewMonth+1}月`;
+  const tbody = document.getElementById('wish-review-body');
+  if (db.staff.length === 0) { tbody.innerHTML = '<tr><td colspan="5" style="padding:16px;color:var(--text-hint)">スタッフがいません</td></tr>'; return; }
+  tbody.innerHTML = db.staff.map(s => {
+    const key = wKey(wishReviewYear, wishReviewMonth, s.id);
+    const w = db.wishes[key] || {};
+    const cnt = Object.keys(w).length;
+    const days = Object.entries(w).map(([d,v]) => `${d}日(${TIME_LABELS[v.time]||v.time})`).join(', ');
+    return `<tr>
+      <td style="font-weight:500">${s.name}</td>
+      <td><span class="badge badge-gray">${s.role}</span></td>
+      <td style="color:var(--text-sub);font-size:12px">${cnt > 0 ? '提出済' : '—'}</td>
+      <td>${cnt}日 <span style="font-size:11px;color:var(--text-hint)">${days}</span></td>
+      <td>${cnt>0?'<span class="badge badge-green">提出済</span>':'<span class="badge badge-amber">未提出</span>'}</td>
+    </tr>`;
+  }).join('');
+}
+
+function changeWishReviewMonth(d) {
+  wishReviewMonth += d;
+  if(wishReviewMonth<0){wishReviewMonth=11;wishReviewYear--;}
+  if(wishReviewMonth>11){wishReviewMonth=0;wishReviewYear++;}
+  renderWishReview();
+}
+
+// ══════════ STAFF CAL (MY SHIFT) ══════════
+function renderStaffCal() {
+  const prefix = `${staffCalYear}-${String(staffCalMonth+1).padStart(2,'0')}`;
+  const isPublished = !!db.published[prefix];
+  document.getElementById('staff-cal-month').textContent = `${staffCalYear}年 ${staffCalMonth+1}月`;
+  document.getElementById('staff-shift-status').innerHTML = isPublished
+    ? `<div class="alert-box alert-green">✓ ${staffCalYear}年${staffCalMonth+1}月のシフトが公開されています</div>`
+    : `<div class="alert-box alert-amber">⚠ ${staffCalYear}年${staffCalMonth+1}月のシフトはまだ公開されていません</div>`;
+
+  const first = new Date(staffCalYear, staffCalMonth, 1);
+  const last = new Date(staffCalYear, staffCalMonth+1, 0);
+  const startDay = first.getDay();
+  const today = new Date();
+  const cells = Math.ceil((startDay + last.getDate()) / 7) * 7;
+  let day = 1, html = '';
+  const wk = wKey(staffCalYear, staffCalMonth, currentUser.id);
+  const myWishes = db.wishes[wk] || {};
+
+  for (let i = 0; i < cells; i++) {
+    if (i % 7 === 0) html += '<tr>';
+    if (i < startDay || day > last.getDate()) {
+      html += '<td class="other-month"></td>';
+      if (i >= startDay) day++;
+    } else {
+      const dow = (startDay + day - 1) % 7;
+      const isToday = today.getFullYear()===staffCalYear && today.getMonth()===staffCalMonth && today.getDate()===day;
+      const key = dKey(staffCalYear, staffCalMonth, day);
+      const dayShifts = (db.shifts[key] || []).filter(s => s.staffId === currentUser.id);
+      const hasWish = !!myWishes[String(day)];
+      const d = day;
+      html += `<td style="cursor:default">`;
+      html += `<div class="day-num ${isToday?'today':''} ${dow===0?'sun':''} ${dow===6?'sat':''}">${day}</div>`;
+      if (hasWish && !isPublished) {
+        html += `<div class="wish-dot">${TIME_LABELS[myWishes[String(day)].time]||'希望済'}</div>`;
+      }
+      if (isPublished) {
+        dayShifts.forEach(s => {
+          const c = COLORS[currentUser.color % COLORS.length];
+          html += `<div class="shift-pill" style="background:${c.bg};color:${c.text};border:0.5px solid ${c.border}">${TIME_LABELS[s.time]}</div>`;
+        });
+        if (dayShifts.length === 0 && hasWish) {
+          html += `<div style="font-size:10px;color:var(--text-hint);padding:2px">休み</div>`;
+        }
+      }
+      html += '</td>';
+      day++;
+    }
+    if ((i+1) % 7 === 0) html += '</tr>';
+  }
+  document.getElementById('staff-cal-body').innerHTML = html;
+}
+
+function changeStaffMonth(d) { staffCalMonth += d; if(staffCalMonth<0){staffCalMonth=11;staffCalYear--;}if(staffCalMonth>11){staffCalMonth=0;staffCalYear++;} renderStaffCal(); }
+
+// ══════════ WISH SUBMIT (STAFF) ══════════
+let pendingWishes = {};
+
+function renderWishSubmit() {
+  document.getElementById('wish-month-label').textContent = `${wishYear}年 ${wishMonth+1}月`;
+  const wk = wKey(wishYear, wishMonth, currentUser.id);
+  pendingWishes = JSON.parse(JSON.stringify(db.wishes[wk] || {}));
+  buildWishGrid();
+}
+
+function buildWishGrid() {
+  const first = new Date(wishYear, wishMonth, 1);
+  const last = new Date(wishYear, wishMonth+1, 0);
+  const startDay = first.getDay();
+  const cells = Math.ceil((startDay + last.getDate()) / 7) * 7;
+  const s = currentUser;
+  let html = '';
+
+  for (let i = 0; i < cells; i++) {
+    const day = i - startDay + 1;
+    if (i < startDay || day > last.getDate()) {
+      html += `<div class="wish-cell other-m"></div>`;
+    } else {
+      const dow = (startDay + day - 1) % 7;
+      const canWork = s.days.includes(dow);
+      const isSelected = !!pendingWishes[String(day)];
+      const time = isSelected ? pendingWishes[String(day)].time : 'lunch';
+      const dowClass = dow === 0 ? 'sun' : dow === 6 ? 'sat' : '';
+      if (!canWork) {
+        html += `<div class="wish-cell off-day"><div class="wish-day-num ${dowClass}">${day}</div><div style="font-size:9px;color:var(--text-hint);text-align:center">—</div></div>`;
+      } else {
+        html += `<div class="wish-cell ${isSelected?'selected':''}" id="wcell-${day}" onclick="toggleWishDay(${day},${dow})">
+          <div class="wish-day-num ${dowClass}">${day}</div>
+          <select class="wish-time-select" id="wtime-${day}" onchange="wishTimeChange(${day},event)" onclick="event.stopPropagation()">
+            <option value="morning" ${time==='morning'?'selected':''}>朝</option>
+            <option value="lunch" ${time==='lunch'?'selected':''}>昼</option>
+            <option value="dinner" ${time==='dinner'?'selected':''}>夜</option>
+            <option value="full" ${time==='full'?'selected':''}>全日</option>
+          </select>
+        </div>`;
+      }
+    }
+  }
+  document.getElementById('wish-grid').innerHTML = html;
+}
+
+function toggleWishDay(day, dow) {
+  if (pendingWishes[String(day)]) {
+    delete pendingWishes[String(day)];
+  } else {
+    pendingWishes[String(day)] = {time: 'lunch'};
+  }
+  buildWishGrid();
+}
+
+function wishTimeChange(day, e) {
+  if (pendingWishes[String(day)]) pendingWishes[String(day)].time = e.target.value;
+}
+
+function submitWishes() {
+  const wk = wKey(wishYear, wishMonth, currentUser.id);
+  db.wishes[wk] = JSON.parse(JSON.stringify(pendingWishes));
+  saveData();
+  document.getElementById('wish-submit-alert').style.display = 'flex';
+  setTimeout(() => document.getElementById('wish-submit-alert').style.display = 'none', 3000);
+}
+
+function clearWishes() { pendingWishes = {}; buildWishGrid(); }
+function changeWishMonth(d) { wishMonth += d; if(wishMonth<0){wishMonth=11;wishYear--;}if(wishMonth>11){wishMonth=0;wishYear++;} renderWishSubmit(); }
+
+// ══════════ SETTINGS ══════════
+function loadSettings() {
+  document.getElementById('line-webhook-input').value = db.lineWebhook || '';
+  document.getElementById('rule-weekday-min').value = db.rules.weekdayMin;
+  document.getElementById('rule-weekend-min').value = db.rules.weekendMin;
+  document.getElementById('rule-wish-priority').checked = db.rules.wishPriority;
+  updateLINEStatus();
+}
+
+function updateLINEStatus() {
+  const connected = !!db.lineWebhook;
+  document.getElementById('line-dot').className = 'line-dot' + (connected?' connected':'');
+  document.getElementById('line-status-text').textContent = connected ? '設定済' : '未設定';
+}
+
+function saveLINEWebhook() {
+  db.lineWebhook = document.getElementById('line-webhook-input').value.trim();
+  saveData(); updateLINEStatus();
+  alert('LINE通知設定を保存しました');
+}
+
+function testLINE() {
+  if (!db.lineWebhook) { alert('先にWebhook URLを保存してください'); return; }
+  sendLINENotify('【テスト】ShiftMgrからのテスト通知です。正常に設定されています。');
+}
+
+function sendLINENotify(msg) {
+  fetch(db.lineWebhook, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+    body: 'message=' + encodeURIComponent(msg)
+  }).then(() => alert('LINE通知を送信しました')).catch(() => alert('LINE通知の送信に失敗しました。Webhook URLを確認してください。'));
+}
+
+function saveRules() {
+  db.rules.weekdayMin = parseInt(document.getElementById('rule-weekday-min').value) || 2;
+  db.rules.weekendMin = parseInt(document.getElementById('rule-weekend-min').value) || 3;
+  db.rules.wishPriority = document.getElementById('rule-wish-priority').checked;
+  saveData(); alert('ルールを保存しました');
+}
+
+function changeAdminPIN() {
+  const pin = document.getElementById('new-admin-pin').value;
+  if (!pin || pin.length !== 4 || !/^\d+$/.test(pin)) { alert('4桁の数字で入力してください'); return; }
+  db.adminPin = pin; saveData(); alert('管理者PINを変更しました');
+  document.getElementById('new-admin-pin').value = '';
+}
+
+// ══════════ MODAL UTILS ══════════
+function closeModal(id) { document.getElementById(id).style.display = 'none'; }
+</script>
+</body>
+</html>
