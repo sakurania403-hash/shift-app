@@ -1,6 +1,12 @@
+import 'dart:convert';
+// ignore: avoid_web_libraries_in_flutter
+import 'dart:html' as html;
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'dart:ui' as ui;
 import 'package:intl/intl.dart';
 import '../services/admin_shift_service.dart';
+import 'shift_timeline_screen.dart';
 
 class AdminShiftOverviewScreen extends StatefulWidget {
   final Map<String, dynamic> recruitment;
@@ -20,11 +26,16 @@ class AdminShiftOverviewScreen extends StatefulWidget {
 class _AdminShiftOverviewScreenState
     extends State<AdminShiftOverviewScreen> {
   final _service = AdminShiftService();
+  final _repaintKey = GlobalKey();
+
   List<Map<String, dynamic>> _staff = [];
   Map<String, Map<String, dynamic>> _shiftRequests = {};
   Map<String, Map<String, dynamic>> _dayOffRequests = {};
+  Map<String, Map<String, dynamic>> _confirmedShifts = {};
+  Map<String, List<Map<String, dynamic>>> _tempShifts = {};
   List<Map<String, dynamic>> _submissions = [];
   bool _isLoading = true;
+  bool _isSaving = false;
   late DateTime _workStart;
   late DateTime _workEnd;
 
@@ -52,6 +63,11 @@ class _AdminShiftOverviewScreenState
       );
       final submissions =
           await _service.getSubmissions(widget.recruitment['id']);
+      final confirmed = await _service.getConfirmedShifts(
+        storeId: widget.storeId,
+        from: _workStart,
+        to: _workEnd,
+      );
 
       final shiftMap = <String, Map<String, dynamic>>{};
       for (var s in shifts) {
@@ -65,10 +81,24 @@ class _AdminShiftOverviewScreenState
         dayOffMap[key] = d;
       }
 
+      final confirmedMap = <String, Map<String, dynamic>>{};
+      final tempMap = <String, List<Map<String, dynamic>>>{};
+      for (var c in confirmed) {
+        final dateStr = c['date'].toString().substring(0, 10);
+        if (c['staff_type'] == 'temp') {
+          tempMap.putIfAbsent(dateStr, () => []).add(c);
+        } else if (c['user_id'] != null) {
+          final key = '${c['user_id']}_$dateStr';
+          confirmedMap[key] = c;
+        }
+      }
+
       setState(() {
         _staff = staff;
         _shiftRequests = shiftMap;
         _dayOffRequests = dayOffMap;
+        _confirmedShifts = confirmedMap;
+        _tempShifts = tempMap;
         _submissions = submissions;
         _isLoading = false;
       });
@@ -89,20 +119,72 @@ class _AdminShiftOverviewScreenState
     return dates;
   }
 
+  /// 全日付にまたがるヘルプ等の「行」リストを生成
+  /// タイミー（「タイミー」で始まるラベル）を数字順で先、ヘルプ（それ以外）を後ろに
+  List<String> get _tempRows {
+    final allLabels = <String>{};
+    for (var list in _tempShifts.values) {
+      for (var t in list) {
+        final label = (t['temp_label'] ?? '') as String;
+        if (label.isNotEmpty) allLabels.add(label);
+      }
+    }
+
+    final timeeLabels = allLabels
+        .where((l) => l.startsWith('タイミー'))
+        .toList()
+      ..sort((a, b) {
+        // 「タイミー1」「タイミー2」... の数字部分で並び替え
+        final aNum =
+            int.tryParse(a.replaceAll('タイミー', '').trim()) ?? 9999;
+        final bNum =
+            int.tryParse(b.replaceAll('タイミー', '').trim()) ?? 9999;
+        return aNum.compareTo(bNum);
+      });
+
+    final helpLabels = allLabels
+        .where((l) => !l.startsWith('タイミー'))
+        .toList()
+      ..sort();
+
+    return [...timeeLabels, ...helpLabels];
+  }
+
   bool _isSubmitted(String userId) {
     return _submissions.any((s) => s['user_id'] == userId);
   }
 
+  bool _isConfirmed(String userId, String dateStr) {
+    return _confirmedShifts.containsKey('${userId}_$dateStr');
+  }
+
+  int _confirmedCount(String dateStr) {
+    int count = 0;
+    for (var m in _staff) {
+      final profile = m['user_profiles'] as Map<String, dynamic>;
+      final userId = profile['id'] as String;
+      if (_confirmedShifts.containsKey('${userId}_$dateStr')) count++;
+    }
+    count += (_tempShifts[dateStr]?.length ?? 0);
+    return count;
+  }
+
   String _getCellText(String userId, String dateStr) {
+    final confirmedKey = '${userId}_$dateStr';
+    if (_confirmedShifts.containsKey(confirmedKey)) {
+      final c = _confirmedShifts[confirmedKey]!;
+      final start = c['start_time']?.toString().substring(0, 5) ?? '';
+      if (c['is_last'] == true) return '$start\n~L';
+      final end = c['end_time']?.toString().substring(0, 5) ?? '';
+      return '$start\n~$end';
+    }
     final key = '${userId}_$dateStr';
     if (_dayOffRequests.containsKey(key)) return '休';
     final shift = _shiftRequests[key];
     if (shift == null) return '';
     final start =
         shift['preferred_start']?.toString().substring(0, 5) ?? '';
-    if (shift['is_last'] == true) {
-      return start.isEmpty ? 'L' : '$start\n~L';
-    }
+    if (shift['is_last'] == true) return '$start\n~L';
     final end =
         shift['preferred_end']?.toString().substring(0, 5) ?? '';
     if (start.isEmpty) return '○';
@@ -110,6 +192,7 @@ class _AdminShiftOverviewScreenState
   }
 
   Color _getCellColor(String userId, String dateStr) {
+    if (_isConfirmed(userId, dateStr)) return Colors.teal[500]!;
     final key = '${userId}_$dateStr';
     if (_dayOffRequests.containsKey(key)) return Colors.red[50]!;
     if (_shiftRequests.containsKey(key)) return Colors.teal[50]!;
@@ -117,6 +200,7 @@ class _AdminShiftOverviewScreenState
   }
 
   Color _getCellTextColor(String userId, String dateStr) {
+    if (_isConfirmed(userId, dateStr)) return Colors.white;
     final key = '${userId}_$dateStr';
     if (_dayOffRequests.containsKey(key)) return Colors.red[400]!;
     if (_shiftRequests.containsKey(key)) return Colors.teal[700]!;
@@ -124,9 +208,8 @@ class _AdminShiftOverviewScreenState
   }
 
   int _getSubmittedCount(String userId) {
-    final dates = _dates;
     int count = 0;
-    for (var d in dates) {
+    for (var d in _dates) {
       final dateStr = d.toIso8601String().substring(0, 10);
       final key = '${userId}_$dateStr';
       if (_shiftRequests.containsKey(key) ||
@@ -137,11 +220,55 @@ class _AdminShiftOverviewScreenState
     return count;
   }
 
+  Future<void> _shareShift() async {
+    setState(() => _isSaving = true);
+    try {
+      final boundary = _repaintKey.currentContext?.findRenderObject()
+          as RenderRepaintBoundary?;
+      if (boundary == null) return;
+
+      final image = await boundary.toImage(pixelRatio: 2.0);
+      final byteData =
+          await image.toByteData(format: ui.ImageByteFormat.png);
+      if (byteData == null) return;
+
+      final bytes = byteData.buffer.asUint8List();
+      final base64str = base64Encode(bytes);
+      final dataUrl = 'data:image/png;base64,$base64str';
+
+      final title = widget.recruitment['title'] ?? 'shift';
+      final anchor = html.AnchorElement(href: dataUrl)
+        ..setAttribute('download', '$title.png')
+        ..click();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('シフト表を画像としてダウンロードしました'),
+            backgroundColor: Colors.teal,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('エラー: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final dates = _dates;
     final fmt = DateFormat('M/d', 'ja');
     final fmtDay = DateFormat('E', 'ja');
+    final tempRows = _tempRows;
 
     return Scaffold(
       appBar: AppBar(
@@ -158,6 +285,7 @@ class _AdminShiftOverviewScreenState
           ? const Center(child: CircularProgressIndicator())
           : Column(
               children: [
+                // サマリーヘッダー
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(12),
@@ -206,168 +334,376 @@ class _AdminShiftOverviewScreenState
                     ],
                   ),
                 ),
+                // 凡例 + シフト共有ボタン
                 Padding(
                   padding: const EdgeInsets.symmetric(
                       horizontal: 12, vertical: 6),
                   child: Row(
                     children: [
-                      _legend(Colors.teal[50]!, Colors.teal[700]!, '出勤希望'),
-                      const SizedBox(width: 12),
-                      _legend(Colors.red[50]!, Colors.red[400]!, '希望休'),
-                      const SizedBox(width: 12),
-                      _legend(Colors.white, Colors.grey[400]!, '未提出'),
+                      Expanded(
+                        child: Wrap(
+                          spacing: 12,
+                          runSpacing: 4,
+                          children: [
+                            _legend(
+                                Colors.teal[500]!, Colors.white, '確定済み'),
+                            _legend(Colors.teal[50]!, Colors.teal[700]!,
+                                '出勤希望'),
+                            _legend(
+                                Colors.red[50]!, Colors.red[400]!, '希望休'),
+                            _legend(
+                                Colors.white, Colors.grey[400]!, '未提出'),
+                            _legend(Colors.orange[400]!, Colors.white,
+                                'ヘルプ等'),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      ElevatedButton.icon(
+                        onPressed: _isSaving ? null : _shareShift,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.teal,
+                          foregroundColor: Colors.white,
+                        ),
+                        icon: _isSaving
+                            ? const SizedBox(
+                                width: 14,
+                                height: 14,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Icon(Icons.download, size: 16),
+                        label: const Text('シフト共有',
+                            style: TextStyle(fontSize: 13)),
+                      ),
                     ],
                   ),
                 ),
+                // シフト表本体
                 Expanded(
                   child: _staff.isEmpty
                       ? const Center(child: Text('スタッフがいません'))
-                      : SingleChildScrollView(
-                          scrollDirection: Axis.vertical,
-                          child: SingleChildScrollView(
-                            scrollDirection: Axis.horizontal,
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
+                      : RepaintBoundary(
+                          key: _repaintKey,
+                          child: Container(
+                            color: Colors.white,
+                            child: SingleChildScrollView(
+                              scrollDirection: Axis.vertical,
+                              child: SingleChildScrollView(
+                                scrollDirection: Axis.horizontal,
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
                                   children: [
-                                    Container(
-                                      width: 70,
-                                      height: 48,
-                                      decoration: BoxDecoration(
-                                        color: Colors.grey[100],
-                                        border: Border.all(
-                                            color: Colors.grey[300]!,
-                                            width: 0.5),
-                                      ),
-                                      alignment: Alignment.center,
-                                      child: const Text(
-                                        'スタッフ',
-                                        style: TextStyle(
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
+                                    // ヘッダー行
+                                    Row(
+                                      children: [
+                                        _headerCell('スタッフ', 70, 68),
+                                        ...dates.map((date) {
+                                          final weekday = date.weekday;
+                                          final isSunday =
+                                              weekday == DateTime.sunday;
+                                          final isSaturday =
+                                              weekday == DateTime.saturday;
+                                          final dateStr = date
+                                              .toIso8601String()
+                                              .substring(0, 10);
+                                          final confirmedCnt =
+                                              _confirmedCount(dateStr);
+
+                                          return GestureDetector(
+                                            onTap: () {
+                                              Navigator.push(
+                                                context,
+                                                MaterialPageRoute(
+                                                  builder: (_) =>
+                                                      ShiftTimelineScreen(
+                                                    date: date,
+                                                    storeId: widget.storeId,
+                                                    confirmedShifts:
+                                                        _confirmedShifts
+                                                            .values
+                                                            .toList(),
+                                                    staff: _staff,
+                                                    shiftRequests:
+                                                        _shiftRequests.values
+                                                            .toList(),
+                                                    dayOffRequests:
+                                                        _dayOffRequests.values
+                                                            .toList(),
+                                                    allDates: dates,
+                                                  ),
+                                                ),
+                                              ).then((_) => _loadData());
+                                            },
+                                            child: Container(
+                                              width: 62,
+                                              height: 68,
+                                              decoration: BoxDecoration(
+                                                color: isSunday
+                                                    ? Colors.red[50]
+                                                    : isSaturday
+                                                        ? Colors.blue[50]
+                                                        : Colors.grey[100],
+                                                border: Border.all(
+                                                    color: Colors.grey[300]!,
+                                                    width: 0.5),
+                                              ),
+                                              alignment: Alignment.center,
+                                              child: Column(
+                                                mainAxisAlignment:
+                                                    MainAxisAlignment.center,
+                                                children: [
+                                                  Text(
+                                                    fmt.format(date),
+                                                    style: TextStyle(
+                                                      fontSize: 10,
+                                                      fontWeight:
+                                                          FontWeight.bold,
+                                                      color: isSunday
+                                                          ? Colors.red
+                                                          : isSaturday
+                                                              ? Colors.blue
+                                                              : Colors.black87,
+                                                    ),
+                                                  ),
+                                                  Text(
+                                                    fmtDay.format(date),
+                                                    style: TextStyle(
+                                                      fontSize: 9,
+                                                      color: isSunday
+                                                          ? Colors.red
+                                                          : isSaturday
+                                                              ? Colors.blue
+                                                              : Colors.grey[600],
+                                                    ),
+                                                  ),
+                                                  const SizedBox(height: 4),
+                                                  Container(
+                                                    padding: const EdgeInsets
+                                                        .symmetric(
+                                                        horizontal: 4,
+                                                        vertical: 2),
+                                                    decoration: BoxDecoration(
+                                                      color: confirmedCnt > 0
+                                                          ? Colors.teal[600]
+                                                          : Colors.grey[500],
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                              4),
+                                                    ),
+                                                    child: Row(
+                                                      mainAxisSize:
+                                                          MainAxisSize.min,
+                                                      children: [
+                                                        const Icon(Icons.people,
+                                                            size: 8,
+                                                            color: Colors.white),
+                                                        const SizedBox(width: 2),
+                                                        Text(
+                                                          confirmedCnt > 0
+                                                              ? '$confirmedCnt人確定'
+                                                              : '人員確認',
+                                                          style: const TextStyle(
+                                                            fontSize: 7,
+                                                            color: Colors.white,
+                                                            fontWeight:
+                                                                FontWeight.bold,
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          );
+                                        }),
+                                      ],
                                     ),
-                                    ...dates.map((date) {
-                                      final weekday = date.weekday;
-                                      final isSunday =
-                                          weekday == DateTime.sunday;
-                                      final isSaturday =
-                                          weekday == DateTime.saturday;
-                                      return Container(
-                                        width: 52,
-                                        height: 48,
-                                        decoration: BoxDecoration(
-                                          color: isSunday
-                                              ? Colors.red[50]
-                                              : isSaturday
-                                                  ? Colors.blue[50]
-                                                  : Colors.grey[100],
-                                          border: Border.all(
-                                              color: Colors.grey[300]!,
-                                              width: 0.5),
-                                        ),
-                                        alignment: Alignment.center,
-                                        child: Column(
-                                          mainAxisAlignment:
-                                              MainAxisAlignment.center,
-                                          children: [
-                                            Text(
-                                              fmt.format(date),
+                                    // スタッフ行（管理者も含め全員薄緑）
+                                    ..._staff.map((m) {
+                                      final profile = m['user_profiles']
+                                          as Map<String, dynamic>;
+                                      final userId = profile['id'] as String;
+                                      final name = profile['name'] as String;
+
+                                      return Row(
+                                        children: [
+                                          // 名前セル（管理者・スタッフ問わず薄緑）
+                                          Container(
+                                            width: 70,
+                                            height: 52,
+                                            decoration: BoxDecoration(
+                                              color: Colors.teal[50],
+                                              border: Border.all(
+                                                  color: Colors.grey[300]!,
+                                                  width: 0.5),
+                                            ),
+                                            alignment: Alignment.center,
+                                            padding:
+                                                const EdgeInsets.all(4),
+                                            child: Text(
+                                              name,
+                                              style: TextStyle(
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.w500,
+                                                color: Colors.teal[800],
+                                              ),
+                                              textAlign: TextAlign.center,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                          ...dates.map((date) {
+                                            final dateStr = date
+                                                .toIso8601String()
+                                                .substring(0, 10);
+                                            return Container(
+                                              width: 62,
+                                              height: 52,
+                                              decoration: BoxDecoration(
+                                                color: _getCellColor(
+                                                    userId, dateStr),
+                                                border: Border.all(
+                                                    color: Colors.grey[200]!,
+                                                    width: 0.5),
+                                              ),
+                                              alignment: Alignment.center,
+                                              child: Text(
+                                                _getCellText(userId, dateStr),
+                                                style: TextStyle(
+                                                  fontSize: 8,
+                                                  color: _getCellTextColor(
+                                                      userId, dateStr),
+                                                  fontWeight: FontWeight.w500,
+                                                ),
+                                                textAlign: TextAlign.center,
+                                              ),
+                                            );
+                                          }),
+                                        ],
+                                      );
+                                    }),
+                                    // 区切り線
+                                    if (tempRows.isNotEmpty)
+                                      Container(
+                                        height: 2,
+                                        color: Colors.orange[200],
+                                      ),
+                                    // ヘルプ等：ラベルごとに1行
+                                    ...tempRows.map((label) {
+                                      final isTimee =
+                                          label.startsWith('タイミー');
+                                      return Row(
+                                        children: [
+                                          // 名前セル
+                                          Container(
+                                            width: 70,
+                                            height: 44,
+                                            decoration: BoxDecoration(
+                                              color: Colors.orange[50],
+                                              border: Border.all(
+                                                  color: Colors.grey[300]!,
+                                                  width: 0.5),
+                                            ),
+                                            alignment: Alignment.center,
+                                            padding:
+                                                const EdgeInsets.all(4),
+                                            child: Text(
+                                              label,
                                               style: TextStyle(
                                                 fontSize: 10,
-                                                fontWeight: FontWeight.bold,
-                                                color: isSunday
-                                                    ? Colors.red
-                                                    : isSaturday
-                                                        ? Colors.blue
-                                                        : Colors.black87,
+                                                color: isTimee
+                                                    ? Colors.orange[700]
+                                                    : Colors.deepOrange[700],
+                                                fontWeight: FontWeight.w500,
                                               ),
+                                              textAlign: TextAlign.center,
+                                              overflow: TextOverflow.ellipsis,
                                             ),
-                                            Text(
-                                              fmtDay.format(date),
-                                              style: TextStyle(
-                                                fontSize: 9,
-                                                color: isSunday
-                                                    ? Colors.red
-                                                    : isSaturday
-                                                        ? Colors.blue
-                                                        : Colors.grey[600],
+                                          ),
+                                          // 日付ごとのセル
+                                          ...dates.map((date) {
+                                            final dateStr = date
+                                                .toIso8601String()
+                                                .substring(0, 10);
+                                            final temps =
+                                                _tempShifts[dateStr] ?? [];
+                                            // このラベルに一致するシフトを探す
+                                            final temp = temps.firstWhere(
+                                              (t) =>
+                                                  (t['temp_label'] ?? '') ==
+                                                  label,
+                                              orElse: () => {},
+                                            );
+
+                                            if (temp.isEmpty) {
+                                              return Container(
+                                                width: 62,
+                                                height: 44,
+                                                decoration: BoxDecoration(
+                                                  color: Colors.white,
+                                                  border: Border.all(
+                                                      color: Colors.grey[200]!,
+                                                      width: 0.5),
+                                                ),
+                                              );
+                                            }
+
+                                            final start = temp['start_time']
+                                                    ?.toString()
+                                                    .substring(0, 5) ??
+                                                '';
+                                            final isLast =
+                                                temp['is_last'] == true;
+                                            final end = isLast
+                                                ? 'L'
+                                                : temp['end_time']
+                                                        ?.toString()
+                                                        .substring(0, 5) ??
+                                                    '';
+
+                                            return Container(
+                                              width: 62,
+                                              height: 44,
+                                              decoration: BoxDecoration(
+                                                color: Colors.orange[50],
+                                                border: Border.all(
+                                                    color: Colors.grey[200]!,
+                                                    width: 0.5),
                                               ),
-                                            ),
-                                          ],
-                                        ),
+                                              alignment: Alignment.center,
+                                              child: Container(
+                                                margin: const EdgeInsets.all(2),
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                        horizontal: 2,
+                                                        vertical: 1),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.orange[400],
+                                                  borderRadius:
+                                                      BorderRadius.circular(3),
+                                                ),
+                                                child: Text(
+                                                  '$start\n~$end',
+                                                  style: const TextStyle(
+                                                    fontSize: 7,
+                                                    color: Colors.white,
+                                                    fontWeight: FontWeight.bold,
+                                                  ),
+                                                  textAlign: TextAlign.center,
+                                                ),
+                                              ),
+                                            );
+                                          }),
+                                        ],
                                       );
                                     }),
                                   ],
                                 ),
-                                ..._staff.map((m) {
-                                  final profile = m['user_profiles']
-                                      as Map<String, dynamic>;
-                                  final userId = profile['id'] as String;
-                                  final name = profile['name'] as String;
-                                  final submitted = _isSubmitted(userId);
-
-                                  return Row(
-                                    children: [
-                                      Container(
-                                        width: 70,
-                                        height: 52,
-                                        decoration: BoxDecoration(
-                                          color: submitted
-                                              ? Colors.teal[50]
-                                              : Colors.orange[50],
-                                          border: Border.all(
-                                              color: Colors.grey[300]!,
-                                              width: 0.5),
-                                        ),
-                                        alignment: Alignment.center,
-                                        padding: const EdgeInsets.all(4),
-                                        child: Text(
-                                          name,
-                                          style: TextStyle(
-                                            fontSize: 11,
-                                            fontWeight: FontWeight.w500,
-                                            color: submitted
-                                                ? Colors.teal[800]
-                                                : Colors.orange[800],
-                                          ),
-                                          textAlign: TextAlign.center,
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ),
-                                      ...dates.map((date) {
-                                        final dateStr = date
-                                            .toIso8601String()
-                                            .substring(0, 10);
-                                        return Container(
-                                          width: 52,
-                                          height: 52,
-                                          decoration: BoxDecoration(
-                                            color: _getCellColor(
-                                                userId, dateStr),
-                                            border: Border.all(
-                                                color: Colors.grey[200]!,
-                                                width: 0.5),
-                                          ),
-                                          alignment: Alignment.center,
-                                          child: Text(
-                                            _getCellText(userId, dateStr),
-                                            style: TextStyle(
-                                              fontSize: 8,
-                                              color: _getCellTextColor(
-                                                  userId, dateStr),
-                                              fontWeight: FontWeight.w500,
-                                            ),
-                                            textAlign: TextAlign.center,
-                                          ),
-                                        );
-                                      }),
-                                    ],
-                                  );
-                                }),
-                              ],
+                              ),
                             ),
                           ),
                         ),
@@ -377,8 +713,28 @@ class _AdminShiftOverviewScreenState
     );
   }
 
+  Widget _headerCell(String text, double width, double height) {
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        color: Colors.grey[100],
+        border: Border.all(color: Colors.grey[300]!, width: 0.5),
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        text,
+        style: const TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
+  }
+
   Widget _legend(Color bg, Color textColor, String label) {
     return Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
         Container(
           width: 14,

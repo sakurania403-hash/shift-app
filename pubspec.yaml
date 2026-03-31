@@ -33,6 +33,9 @@ dependencies:
   pdf: ^3.10.0
   printing: ^5.12.0
 
+ # Web対応ダウンロード
+  universal_html: ^2.2.4
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -40,4 +43,4 @@ dev_dependencies:
   flutter_lints: ^6.0.0
 
 flutter:
-  uses-material-design: true
+  uses-material-design: true 

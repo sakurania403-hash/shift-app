@@ -5,6 +5,7 @@ import 'login_screen.dart';
 import 'store_setup_screen.dart';
 import 'recruitment_screen.dart';
 import 'invite_screen.dart';
+import 'store_settings_screen.dart';
 
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
@@ -62,7 +63,6 @@ class _MainScreenState extends State<MainScreen> {
       return const StoreSetupScreen();
     }
 
-    // 管理者用ナビ
     final adminDestinations = const [
       NavigationDestination(
         icon: Icon(Icons.home_outlined),
@@ -86,7 +86,6 @@ class _MainScreenState extends State<MainScreen> {
       ),
     ];
 
-    // スタッフ用ナビ
     final staffDestinations = const [
       NavigationDestination(
         icon: Icon(Icons.home_outlined),
@@ -105,7 +104,6 @@ class _MainScreenState extends State<MainScreen> {
       ),
     ];
 
-    // 管理者用画面
     final adminScreens = [
       // ホーム
       Center(
@@ -134,10 +132,9 @@ class _MainScreenState extends State<MainScreen> {
       ),
       const RecruitmentScreen(),
       const InviteScreen(),
-      const Center(child: Text('設定（実装予定）')),
+      const StoreSettingsScreen(),
     ];
 
-    // スタッフ用画面
     final staffScreens = [
       Center(
         child: Column(
