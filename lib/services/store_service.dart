@@ -41,7 +41,14 @@ class StoreService {
         .select('store_id, role, stores(id, name)')
         .eq('user_id', userId);
 
-    return List<Map<String, dynamic>>.from(memberships);
+    // LinkedMap を Map<String, dynamic> に変換
+    return memberships.map((m) {
+      final raw = Map<String, dynamic>.from(m as Map);
+      if (raw['stores'] != null) {
+        raw['stores'] = Map<String, dynamic>.from(raw['stores'] as Map);
+      }
+      return raw;
+    }).toList();
   }
 
   // 自分の所属情報を取得

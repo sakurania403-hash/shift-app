@@ -4,6 +4,7 @@ import '../services/recruitment_service.dart';
 import '../services/store_service.dart';
 import 'shift_request_screen.dart';
 import 'admin_shift_overview_screen.dart';
+import 'staff_confirmed_shift_screen.dart';
 
 class RecruitmentScreen extends StatefulWidget {
   const RecruitmentScreen({super.key});
@@ -28,16 +29,22 @@ class _RecruitmentScreenState extends State<RecruitmentScreen> {
     _loadStores();
   }
 
+  // LinkedMap を安全に変換
+  Map<String, dynamic> _toMap(dynamic value) {
+    if (value == null) return {};
+    if (value is Map<String, dynamic>) return value;
+    return Map<String, dynamic>.from(value as Map);
+  }
+
   Future<void> _loadStores() async {
     final stores = await _storeService.getMyStores();
     setState(() {
       _stores = stores;
       if (stores.isNotEmpty) {
-        final firstStore =
-            stores.first['stores'] as Map<String, dynamic>;
-        _selectedStoreId = firstStore['id'];
-        _selectedStoreName = firstStore['name'];
-        _selectedRole = stores.first['role'];
+        final firstStore = _toMap(stores.first['stores']);
+        _selectedStoreId = firstStore['id'] as String?;
+        _selectedStoreName = firstStore['name'] as String?;
+        _selectedRole = stores.first['role'] as String?;
       }
     });
     if (_selectedStoreId != null) {
@@ -241,22 +248,22 @@ class _RecruitmentScreenState extends State<RecruitmentScreen> {
                   isDense: true,
                 ),
                 items: _stores.map((m) {
-                  final store = m['stores'] as Map<String, dynamic>;
+                  final store = _toMap(m['stores']);
                   return DropdownMenuItem(
                     value: store['id'] as String,
-                    child: Text(store['name']),
+                    child: Text(store['name'] ?? ''),
                   );
                 }).toList(),
                 onChanged: (v) async {
-                  final store = (_stores.firstWhere((m) =>
-                      (m['stores'] as Map<String, dynamic>)['id'] ==
-                      v)['stores']) as Map<String, dynamic>;
+                  final matched = _stores.firstWhere((m) {
+                    final store = _toMap(m['stores']);
+                    return store['id'] == v;
+                  });
+                  final store = _toMap(matched['stores']);
                   setState(() {
                     _selectedStoreId = v;
-                    _selectedStoreName = store['name'];
-                    _selectedRole = _stores.firstWhere((m) =>
-                        (m['stores'] as Map<String, dynamic>)['id'] ==
-                        v)['role'];
+                    _selectedStoreName = store['name'] as String?;
+                    _selectedRole = matched['role'] as String?;
                   });
                   await _loadRecruitments();
                 },
@@ -286,159 +293,209 @@ class _RecruitmentScreenState extends State<RecruitmentScreen> {
                     itemBuilder: (context, index) {
                       final r = _recruitments[index];
                       final isOpen = r['status'] == 'open';
-                      return GestureDetector(
-                        onTap: () {
-                          if (isAdmin) {
-                            // 管理者は希望確認画面へ
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) =>
-                                    AdminShiftOverviewScreen(
-                                  recruitment: r,
-                                  storeId: _selectedStoreId!,
-                                ),
-                              ),
-                            );
-                          } else {
-                            // スタッフは希望入力画面へ
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => ShiftRequestScreen(
-                                  recruitment: r,
-                                  storeId: _selectedStoreId!,
-                                  storeName: _selectedStoreName!,
-                                ),
-                              ),
-                            );
-                          }
-                        },
-                        child: Card(
-                          margin: const EdgeInsets.only(bottom: 10),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            side: BorderSide(
-                              color: isOpen ? Colors.teal : Colors.grey,
-                              width: 0.5,
-                            ),
+
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 10),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          side: BorderSide(
+                            color: isOpen ? Colors.teal : Colors.grey,
+                            width: 0.5,
                           ),
-                          child: Padding(
-                            padding: const EdgeInsets.all(16),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: Text(
-                                        r['title'],
-                                        style: const TextStyle(
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                    ),
-                                    Container(
-                                      padding:
-                                          const EdgeInsets.symmetric(
-                                              horizontal: 8, vertical: 4),
-                                      decoration: BoxDecoration(
-                                        color: isOpen
-                                            ? Colors.teal[50]
-                                            : Colors.grey[100],
-                                        borderRadius:
-                                            BorderRadius.circular(8),
-                                      ),
-                                      child: Text(
-                                        isOpen ? '募集中' : '締切',
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          color: isOpen
-                                              ? Colors.teal[700]
-                                              : Colors.grey[600],
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 8),
-                                Row(
-                                  children: [
-                                    const Icon(Icons.work_outline,
-                                        size: 14, color: Colors.grey),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      '勤務期間：${fmt.format(DateTime.parse(r['work_start']))} 〜 ${fmt.format(DateTime.parse(r['work_end']))}',
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      r['title'],
                                       style: const TextStyle(
-                                          fontSize: 13,
-                                          color: Colors.grey),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 4),
-                                Row(
-                                  children: [
-                                    const Icon(Icons.schedule,
-                                        size: 14, color: Colors.grey),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      '提出期限：${fmt.format(DateTime.parse(r['request_start']))} 〜 ${fmt.format(DateTime.parse(r['request_end']))}',
-                                      style: const TextStyle(
-                                          fontSize: 13,
-                                          color: Colors.grey),
-                                    ),
-                                  ],
-                                ),
-                                if (isAdmin) ...[
-                                  const SizedBox(height: 8),
-                                  Row(
-                                    children: [
-                                      const Icon(Icons.touch_app,
-                                          size: 14,
-                                          color: Colors.teal),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        'タップして希望シフトを確認',
-                                        style: TextStyle(
-                                            fontSize: 12,
-                                            color: Colors.teal[600]),
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold,
                                       ),
-                                    ],
+                                    ),
                                   ),
-                                  const SizedBox(height: 8),
-                                  Row(
-                                    mainAxisAlignment:
-                                        MainAxisAlignment.end,
-                                    children: [
-                                      if (isOpen)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 8, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: isOpen
+                                          ? Colors.teal[50]
+                                          : Colors.grey[100],
+                                      borderRadius:
+                                          BorderRadius.circular(8),
+                                    ),
+                                    child: Text(
+                                      isOpen ? '募集中' : '締切',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: isOpen
+                                            ? Colors.teal[700]
+                                            : Colors.grey[600],
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Row(
+                                children: [
+                                  const Icon(Icons.work_outline,
+                                      size: 14, color: Colors.grey),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    '勤務期間：${fmt.format(DateTime.parse(r['work_start']))} 〜 ${fmt.format(DateTime.parse(r['work_end']))}',
+                                    style: const TextStyle(
+                                        fontSize: 13, color: Colors.grey),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              Row(
+                                children: [
+                                  const Icon(Icons.schedule,
+                                      size: 14, color: Colors.grey),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    '提出期限：${fmt.format(DateTime.parse(r['request_start']))} 〜 ${fmt.format(DateTime.parse(r['request_end']))}',
+                                    style: const TextStyle(
+                                        fontSize: 13, color: Colors.grey),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              if (isAdmin) ...[
+                                Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    ElevatedButton.icon(
+                                      onPressed: () {
+                                        Navigator.push(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (_) =>
+                                                AdminShiftOverviewScreen(
+                                              recruitment: r,
+                                              storeId: _selectedStoreId!,
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.teal,
+                                        foregroundColor: Colors.white,
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 12, vertical: 8),
+                                      ),
+                                      icon: const Icon(Icons.people,
+                                          size: 14),
+                                      label: const Text('希望確認・シフト確定',
+                                          style: TextStyle(fontSize: 12)),
+                                    ),
+                                    Row(
+                                      children: [
+                                        if (isOpen)
+                                          TextButton(
+                                            onPressed: () async {
+                                              await _recruitmentService
+                                                  .closeRecruitment(r['id']);
+                                              await _loadRecruitments();
+                                            },
+                                            child: const Text('締め切る',
+                                                style: TextStyle(
+                                                    color: Colors.orange)),
+                                          ),
                                         TextButton(
                                           onPressed: () async {
                                             await _recruitmentService
-                                                .closeRecruitment(
-                                                    r['id']);
+                                                .deleteRecruitment(r['id']);
                                             await _loadRecruitments();
                                           },
-                                          child: const Text('締め切る',
+                                          child: const Text('削除',
                                               style: TextStyle(
-                                                  color: Colors.orange)),
+                                                  color: Colors.red)),
                                         ),
-                                      TextButton(
-                                        onPressed: () async {
-                                          await _recruitmentService
-                                              .deleteRecruitment(
-                                                  r['id']);
-                                          await _loadRecruitments();
-                                        },
-                                        child: const Text('削除',
-                                            style: TextStyle(
-                                                color: Colors.red)),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ] else ...[
+                                Row(
+                                  children: [
+                                    if (isOpen)
+                                      Expanded(
+                                        child: OutlinedButton.icon(
+                                          onPressed: () {
+                                            Navigator.push(
+                                              context,
+                                              MaterialPageRoute(
+                                                builder: (_) =>
+                                                    ShiftRequestScreen(
+                                                  recruitment: r,
+                                                  storeId: _selectedStoreId!,
+                                                  storeName:
+                                                      _selectedStoreName!,
+                                                ),
+                                              ),
+                                            );
+                                          },
+                                          style: OutlinedButton.styleFrom(
+                                            foregroundColor: Colors.teal,
+                                            side: const BorderSide(
+                                                color: Colors.teal),
+                                            padding:
+                                                const EdgeInsets.symmetric(
+                                                    vertical: 8),
+                                          ),
+                                          icon: const Icon(
+                                              Icons.edit_calendar,
+                                              size: 14),
+                                          label: const Text('希望を入力',
+                                              style:
+                                                  TextStyle(fontSize: 12)),
+                                        ),
                                       ),
-                                    ],
-                                  ),
-                                ],
+                                    if (isOpen) const SizedBox(width: 8),
+                                    Expanded(
+                                      child: ElevatedButton.icon(
+                                        onPressed: () {
+                                          Navigator.push(
+                                            context,
+                                            MaterialPageRoute(
+                                              builder: (_) =>
+                                                  StaffConfirmedShiftScreen(
+                                                recruitment: r,
+                                                storeId: _selectedStoreId!,
+                                                storeName:
+                                                    _selectedStoreName!,
+                                              ),
+                                            ),
+                                          );
+                                        },
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: Colors.teal,
+                                          foregroundColor: Colors.white,
+                                          padding:
+                                              const EdgeInsets.symmetric(
+                                                  vertical: 8),
+                                        ),
+                                        icon: const Icon(
+                                            Icons.calendar_month,
+                                            size: 14),
+                                        label: const Text('確定シフトを見る',
+                                            style:
+                                                TextStyle(fontSize: 12)),
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ],
-                            ),
+                            ],
                           ),
                         ),
                       );

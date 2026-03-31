@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class InvitationService {
@@ -20,7 +21,7 @@ class InvitationService {
   // トークンから招待情報を取得（認証不要）
   Future<Map<String, dynamic>?> getInvitationByToken(String token) async {
     try {
-      // まず招待情報を取得
+      // 招待情報を取得
       final invitation = await _supabase
           .from('store_invitations')
           .select()
@@ -34,20 +35,24 @@ class InvitationService {
       final expiresAt = DateTime.parse(invitation['expires_at']);
       if (expiresAt.isBefore(DateTime.now())) return null;
 
-      // 店舗情報を別途取得
-      final store = await _supabase
+      // 店舗情報を取得（postgrestのRPC経由で取得）
+      final storeId = invitation['store_id'] as String;
+      final stores = await _supabase
           .from('stores')
           .select('id, name')
-          .eq('id', invitation['store_id'])
-          .maybeSingle();
+          .eq('id', storeId);
 
-      if (store == null) return null;
+      Map<String, dynamic>? store;
+      if (stores.isNotEmpty) {
+        store = Map<String, dynamic>.from(stores.first);
+      }
 
       return {
         ...invitation,
-        'stores': store,
+        'stores': store ?? {'id': storeId, 'name': '店舗'},
       };
     } catch (e) {
+      debugPrint('getInvitationByToken error: $e');
       return null;
     }
   }

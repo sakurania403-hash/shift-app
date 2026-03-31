@@ -45,12 +45,11 @@ class MyApp extends StatelessWidget {
       ),
       initialRoute: '/',
       onGenerateRoute: (settings) {
-        // 招待URLの場合
-        if (isJoinRoute) {
-          return MaterialPageRoute(
-            builder: (_) => JoinScreen(token: token),
-          );
-        }
+  if (isJoinRoute && token != null) {
+    return MaterialPageRoute(
+      builder: (_) => JoinScreen(token: token!),
+    );
+  }
         // 通常ルート
         return MaterialPageRoute(
           builder: (_) => supabase.auth.currentUser != null

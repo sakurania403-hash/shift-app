@@ -51,6 +51,13 @@ class _MainScreenState extends State<MainScreen> {
     }
   }
 
+  // LinkedMap を安全に Map<String, dynamic> に変換
+  Map<String, dynamic> _toMap(dynamic value) {
+    if (value == null) return {};
+    if (value is Map<String, dynamic>) return value;
+    return Map<String, dynamic>.from(value as Map);
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -119,11 +126,11 @@ class _MainScreenState extends State<MainScreen> {
             ),
             const SizedBox(height: 16),
             ..._stores.map((m) {
-              final store = m['stores'] as Map<String, dynamic>;
+              final store = _toMap(m['stores']);
               final role = m['role'] as String;
               return ListTile(
                 leading: const Icon(Icons.store, color: Colors.teal),
-                title: Text(store['name']),
+                title: Text(store['name'] ?? ''),
                 subtitle: Text(role == 'admin' ? '管理者' : 'スタッフ'),
               );
             }),
@@ -149,10 +156,10 @@ class _MainScreenState extends State<MainScreen> {
             ),
             const SizedBox(height: 16),
             ..._stores.map((m) {
-              final store = m['stores'] as Map<String, dynamic>;
+              final store = _toMap(m['stores']);
               return ListTile(
                 leading: const Icon(Icons.store, color: Colors.teal),
-                title: Text(store['name']),
+                title: Text(store['name'] ?? ''),
                 subtitle: const Text('スタッフ'),
               );
             }),

@@ -39,18 +39,27 @@ class _JoinScreenState extends State<JoinScreen> {
   }
 
   Future<void> _loadInvitation() async {
-    final inv = await _invitationService
-        .getInvitationByToken(widget.token);
-    setState(() {
-      _invitation = inv;
-      _isLoading = false;
-      if (inv == null) {
-        _errorMessage = 'この招待URLは無効または期限切れです';
-      }
-    });
+    try {
+      final inv = await _invitationService
+          .getInvitationByToken(widget.token);
+      setState(() {
+        _invitation = inv;
+        _isLoading = false;
+        if (inv == null) {
+          _errorMessage = 'この招待URLは無効または期限切れです';
+        }
+      });
+    } catch (e) {
+      setState(() {
+        _invitation = null;
+        _isLoading = false;
+        _errorMessage = '招待情報の取得に失敗しました: $e';
+      });
+    }
   }
 
   Future<void> _submit() async {
+    if (_invitation == null) return;
     setState(() => _isLoading = true);
     try {
       if (_isLogin) {
@@ -66,10 +75,12 @@ class _JoinScreenState extends State<JoinScreen> {
         );
       }
 
+      final storeId = _invitation!['store_id'] as String;
+
       // 店舗に参加
       await _invitationService.joinStore(
         token: widget.token,
-        storeId: _invitation!['store_id'],
+        storeId: storeId,
       );
 
       if (mounted) {
@@ -78,9 +89,15 @@ class _JoinScreenState extends State<JoinScreen> {
         );
       }
     } on AuthException catch (e) {
-      setState(() => _errorMessage = e.message);
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
+      setState(() {
+        _errorMessage = e.message;
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'エラーが発生しました: $e';
+        _isLoading = false;
+      });
     }
   }
 
@@ -104,6 +121,7 @@ class _JoinScreenState extends State<JoinScreen> {
               Text(
                 _errorMessage ?? '無効な招待URLです',
                 style: const TextStyle(fontSize: 16),
+                textAlign: TextAlign.center,
               ),
             ],
           ),
@@ -111,8 +129,12 @@ class _JoinScreenState extends State<JoinScreen> {
       );
     }
 
-    final store =
-        _invitation!['stores'] as Map<String, dynamic>;
+    // storesがnullの場合も安全に処理
+    final storesData = _invitation!['stores'];
+    String storeName = '店舗';
+    if (storesData != null && storesData is Map) {
+      storeName = (storesData['name'] ?? '店舗').toString();
+    }
 
     return Scaffold(
       backgroundColor: Colors.grey[50],
@@ -135,7 +157,7 @@ class _JoinScreenState extends State<JoinScreen> {
                         size: 64, color: Colors.teal),
                     const SizedBox(height: 16),
                     Text(
-                      '「${store['name']}」に参加する',
+                      '「$storeName」に参加する',
                       style:
                           Theme.of(context).textTheme.headlineSmall,
                       textAlign: TextAlign.center,
@@ -183,6 +205,7 @@ class _JoinScreenState extends State<JoinScreen> {
                       Text(
                         _errorMessage!,
                         style: const TextStyle(color: Colors.red),
+                        textAlign: TextAlign.center,
                       ),
                     ],
                     const SizedBox(height: 24),
@@ -202,7 +225,9 @@ class _JoinScreenState extends State<JoinScreen> {
                         child: _isLoading
                             ? const CircularProgressIndicator(
                                 color: Colors.white)
-                            : Text(_isLogin ? 'ログインして参加' : 'アカウント作成して参加'),
+                            : Text(_isLogin
+                                ? 'ログインして参加'
+                                : 'アカウント作成して参加'),
                       ),
                     ),
                     const SizedBox(height: 16),
