@@ -1,6 +1,5 @@
 import 'dart:convert';
-// ignore: avoid_web_libraries_in_flutter
-import 'dart:html' as html;
+import 'package:universal_html/html.dart' as html;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'dart:ui' as ui;
@@ -237,9 +236,9 @@ class _AdminShiftOverviewScreenState
       final dataUrl = 'data:image/png;base64,$base64str';
 
       final title = widget.recruitment['title'] ?? 'shift';
-      final anchor = html.AnchorElement(href: dataUrl)
-        ..setAttribute('download', '$title.png')
-        ..click();
+      html.AnchorElement(href: dataUrl)
+  ..setAttribute('download', '$title.png')
+  ..click();
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

@@ -66,7 +66,7 @@ class _InviteScreenState extends State<InviteScreen> {
     try {
       final token =
           await _invitationService.createInvitation(_selectedStoreId!);
-      final url = '$_baseUrl/join?token=$token';
+      final url = '$_baseUrl/join?invite=$token';
       await Clipboard.setData(ClipboardData(text: url));
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -87,7 +87,7 @@ class _InviteScreenState extends State<InviteScreen> {
   }
 
   String _getInviteUrl(String token) {
-    return '$_baseUrl/join?token=$token';
+    return '$_baseUrl/join?invite=$token';
   }
 
   @override

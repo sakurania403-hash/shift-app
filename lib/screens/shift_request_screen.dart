@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../services/shift_request_service.dart';
+import '../services/store_settings_service.dart';
 
 class ShiftRequestScreen extends StatefulWidget {
   final Map<String, dynamic> recruitment;
@@ -20,8 +21,14 @@ class ShiftRequestScreen extends StatefulWidget {
 
 class _ShiftRequestScreenState extends State<ShiftRequestScreen> {
   final _service = ShiftRequestService();
+  final _settingsService = StoreSettingsService();
+
   Map<String, dynamic> _shiftRequests = {};
   Map<String, dynamic> _dayOffRequests = {};
+  Set<String> _holidayDates = {};
+  List<Map<String, dynamic>> _specialPeriods = [];
+  Map<String, String> _japaneseHolidays = {}; // 祝日API
+
   bool _isLoading = true;
   bool _isSubmitted = false;
   bool _isSubmitting = false;
@@ -54,15 +61,40 @@ class _ShiftRequestScreenState extends State<ShiftRequestScreen> {
       final isSubmitted = await _service.isSubmitted(
         recruitmentId: widget.recruitment['id'],
       );
+      final holidays =
+          await _settingsService.getShiftHolidays(widget.recruitment['id']);
+      final specialPeriods =
+          await _settingsService.getSpecialPeriods(widget.recruitment['id']);
+      final japaneseHolidays =
+          await StoreSettingsService.getJapaneseHolidays();
+
       setState(() {
         _shiftRequests = {for (var s in shifts) s['date']: s};
         _dayOffRequests = {for (var d in dayOffs) d['date']: d};
         _isSubmitted = isSubmitted;
+        _holidayDates = holidays.map((h) => h['date'] as String).toSet();
+        _specialPeriods = specialPeriods;
+        _japaneseHolidays = japaneseHolidays;
         _isLoading = false;
       });
     } catch (e) {
       setState(() => _isLoading = false);
     }
+  }
+
+  bool _isSpecialPeriod(DateTime date) {
+    final d = DateTime(date.year, date.month, date.day);
+    for (final p in _specialPeriods) {
+      final start = DateTime.parse(p['start_date'] as String);
+      final end = DateTime.parse(p['end_date'] as String);
+      if (!d.isBefore(start) && !d.isAfter(end)) return true;
+    }
+    return false;
+  }
+
+  bool _isJapaneseHoliday(DateTime date) {
+    final key = date.toIso8601String().substring(0, 10);
+    return _japaneseHolidays.containsKey(key);
   }
 
   Future<void> _submit() async {
@@ -138,11 +170,9 @@ class _ShiftRequestScreenState extends State<ShiftRequestScreen> {
             : 'none';
     bool isLast = existing?['is_last'] ?? false;
     final startController = TextEditingController(
-        text:
-            existing?['preferred_start']?.toString().substring(0, 5) ?? '');
+        text: existing?['preferred_start']?.toString().substring(0, 5) ?? '');
     final endController = TextEditingController(
-        text:
-            existing?['preferred_end']?.toString().substring(0, 5) ?? '');
+        text: existing?['preferred_end']?.toString().substring(0, 5) ?? '');
     final noteController =
         TextEditingController(text: existing?['note'] ?? '');
     final fmt = DateFormat('M/d(E)', 'ja');
@@ -295,6 +325,7 @@ class _ShiftRequestScreenState extends State<ShiftRequestScreen> {
 
     return Column(
       children: [
+        // 曜日ヘッダー
         Container(
           color: Colors.grey[100],
           child: Row(
@@ -308,14 +339,11 @@ class _ShiftRequestScreenState extends State<ShiftRequestScreen> {
                 child: Container(
                   padding: const EdgeInsets.symmetric(vertical: 8),
                   alignment: Alignment.center,
-                  child: Text(
-                    w,
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                      color: color,
-                    ),
-                  ),
+                  child: Text(w,
+                      style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: color)),
                 ),
               );
             }).toList(),
@@ -331,8 +359,8 @@ class _ShiftRequestScreenState extends State<ShiftRequestScreen> {
                   child: Container(
                     height: 72,
                     decoration: BoxDecoration(
-                      border: Border.all(
-                          color: Colors.grey[200]!, width: 0.5),
+                      border:
+                          Border.all(color: Colors.grey[200]!, width: 0.5),
                       color: Colors.grey[50],
                     ),
                   ),
@@ -342,53 +370,74 @@ class _ShiftRequestScreenState extends State<ShiftRequestScreen> {
               final date = DateTime(year, month, dayNum);
               final dateStr = date.toIso8601String().substring(0, 10);
               final inRange = _isInRange(date);
+              final isStoreHoliday = _holidayDates.contains(dateStr);
+              final isSpecial = _isSpecialPeriod(date);
+              final isJpHoliday = _isJapaneseHoliday(date);
               final isDayOff = _dayOffRequests.containsKey(dateStr);
               final hasShift = _shiftRequests.containsKey(dateStr);
 
-              Color bgColor = Colors.white;
+              // 背景色の優先順位
+              Color bgColor;
               if (!inRange) {
                 bgColor = Colors.grey[100]!;
+              } else if (isStoreHoliday) {
+                bgColor = Colors.grey[300]!;
               } else if (isDayOff) {
                 bgColor = Colors.red[50]!;
               } else if (hasShift) {
                 bgColor = Colors.teal[50]!;
+              } else if (isSpecial) {
+                bgColor = Colors.pink[50]!;
+              } else {
+                bgColor = Colors.white;
               }
 
-              final weekday = date.weekday % 7;
-              Color dayColor = Colors.black87;
-              if (!inRange) {
+              // 日付文字色：日曜・祝日=赤、土曜=青
+              Color dayColor;
+              if (!inRange || isStoreHoliday) {
                 dayColor = Colors.grey[400]!;
-              } else if (weekday == 0) {
+              } else if (date.weekday == DateTime.sunday || isJpHoliday) {
                 dayColor = Colors.red;
-              } else if (weekday == 6) {
+              } else if (date.weekday == DateTime.saturday) {
                 dayColor = Colors.blue;
+              } else {
+                dayColor = Colors.black87;
               }
 
+              // セル内テキスト
               String cellText = '';
-              if (isDayOff) {
+              String cellSubText = '';
+              if (isStoreHoliday) {
+                cellText = '休業';
+              } else if (isDayOff) {
                 cellText = '休';
               } else if (hasShift) {
                 final shift = _shiftRequests[dateStr];
-                final start = shift['preferred_start']
-                        ?.toString()
-                        .substring(0, 5) ??
-                    '';
+                final start =
+                    shift['preferred_start']?.toString().substring(0, 5) ??
+                        '';
                 if (shift['is_last'] == true) {
                   cellText = start.isEmpty ? 'L' : '$start\n〜L';
                 } else {
-                  final end = shift['preferred_end']
-                          ?.toString()
-                          .substring(0, 5) ??
-                      '';
+                  final end =
+                      shift['preferred_end']?.toString().substring(0, 5) ??
+                          '';
                   cellText = start.isEmpty ? '出勤' : '$start\n〜$end';
                 }
+              } else if (isSpecial) {
+                cellSubText = '★';
               }
+
+              // 祝日ラベル（セル右上に小さく）
+              final showJpHolidayLabel =
+                  isJpHoliday && inRange && !isStoreHoliday;
+
+              final canTap =
+                  inRange && isOpen && !_isSubmitted && !isStoreHoliday;
 
               return Expanded(
                 child: GestureDetector(
-                  onTap: (inRange && isOpen && !_isSubmitted)
-                      ? () => _showDayDialog(date)
-                      : null,
+                  onTap: canTap ? () => _showDayDialog(date) : null,
                   child: Container(
                     height: 72,
                     decoration: BoxDecoration(
@@ -396,33 +445,57 @@ class _ShiftRequestScreenState extends State<ShiftRequestScreen> {
                       border: Border.all(
                           color: Colors.grey[200]!, width: 0.5),
                     ),
-                    child: Column(
+                    child: Stack(
                       children: [
-                        const SizedBox(height: 4),
-                        Text(
-                          '$dayNum',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
-                            color: dayColor,
-                          ),
-                        ),
-                        if (cellText.isNotEmpty)
-                          Padding(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 2),
+                        // 祝日マーク（右上）
+                        if (showJpHolidayLabel)
+                          Positioned(
+                            top: 2,
+                            right: 2,
                             child: Text(
-                              cellText,
+                              '祝',
                               style: TextStyle(
-                                fontSize: 9,
-                                color: isDayOff
-                                    ? Colors.red[400]
-                                    : Colors.teal[700],
-                                fontWeight: FontWeight.w500,
-                              ),
-                              textAlign: TextAlign.center,
+                                  fontSize: 7, color: Colors.red[300]),
                             ),
                           ),
+                        // メインコンテンツ
+                        Column(
+                          children: [
+                            const SizedBox(height: 4),
+                            Text(
+                              '$dayNum',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
+                                color: dayColor,
+                              ),
+                            ),
+                            if (cellText.isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 2),
+                                child: Text(
+                                  cellText,
+                                  style: TextStyle(
+                                    fontSize: 9,
+                                    color: isStoreHoliday
+                                        ? Colors.grey[500]
+                                        : isDayOff
+                                            ? Colors.red[400]
+                                            : Colors.teal[700],
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                  textAlign: TextAlign.center,
+                                ),
+                              ),
+                            if (cellSubText.isNotEmpty)
+                              Text(
+                                cellSubText,
+                                style: TextStyle(
+                                    fontSize: 9, color: Colors.pink[300]),
+                              ),
+                          ],
+                        ),
                       ],
                     ),
                   ),
@@ -453,8 +526,7 @@ class _ShiftRequestScreenState extends State<ShiftRequestScreen> {
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(12),
-                  color:
-                      _isSubmitted ? Colors.green[50] : Colors.teal[50],
+                  color: _isSubmitted ? Colors.green[50] : Colors.teal[50],
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -466,9 +538,8 @@ class _ShiftRequestScreenState extends State<ShiftRequestScreen> {
                         '提出期限：${widget.recruitment['request_end']}',
                         style: TextStyle(
                             fontSize: 13,
-                            color: isOpen
-                                ? Colors.teal[700]
-                                : Colors.grey),
+                            color:
+                                isOpen ? Colors.teal[700] : Colors.grey),
                       ),
                       if (_isSubmitted)
                         Row(
@@ -479,8 +550,7 @@ class _ShiftRequestScreenState extends State<ShiftRequestScreen> {
                             Text(
                               '提出済み（修正して再提出できます）',
                               style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.green[700]),
+                                  fontSize: 12, color: Colors.green[700]),
                             ),
                           ],
                         ),
@@ -491,19 +561,19 @@ class _ShiftRequestScreenState extends State<ShiftRequestScreen> {
                     ],
                   ),
                 ),
+                // 凡例
                 Padding(
                   padding: const EdgeInsets.symmetric(
                       horizontal: 12, vertical: 6),
-                  child: Row(
+                  child: Wrap(
+                    spacing: 10,
+                    runSpacing: 4,
                     children: [
-                      _legend(
-                          Colors.teal[50]!, Colors.teal[700]!, '出勤希望'),
-                      const SizedBox(width: 12),
-                      _legend(
-                          Colors.red[50]!, Colors.red[400]!, '希望休'),
-                      const SizedBox(width: 12),
-                      _legend(Colors.grey[100]!, Colors.grey[400]!,
-                          '対象外'),
+                      _legend(Colors.teal[50]!, Colors.teal[700]!, '出勤希望'),
+                      _legend(Colors.red[50]!, Colors.red[400]!, '希望休'),
+                      _legend(Colors.pink[50]!, Colors.pink[400]!, '繁忙期'),
+                      _legend(Colors.grey[300]!, Colors.grey[500]!, '休業日'),
+                      _legend(Colors.grey[100]!, Colors.grey[400]!, '対象外'),
                     ],
                   ),
                 ),
@@ -515,24 +585,25 @@ class _ShiftRequestScreenState extends State<ShiftRequestScreen> {
                         icon: const Icon(Icons.chevron_left),
                         onPressed: _currentMonth.isAfter(DateTime(
                                 _workStart.year, _workStart.month, 1))
-                            ? () => setState(() => _currentMonth =
-                                DateTime(_currentMonth.year,
-                                    _currentMonth.month - 1, 1))
+                            ? () => setState(() => _currentMonth = DateTime(
+                                _currentMonth.year,
+                                _currentMonth.month - 1,
+                                1))
                             : null,
                       ),
                       Text(
                         DateFormat('yyyy年M月').format(_currentMonth),
                         style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold),
+                            fontSize: 16, fontWeight: FontWeight.bold),
                       ),
                       IconButton(
                         icon: const Icon(Icons.chevron_right),
                         onPressed: _currentMonth.isBefore(DateTime(
                                 _workEnd.year, _workEnd.month, 1))
-                            ? () => setState(() => _currentMonth =
-                                DateTime(_currentMonth.year,
-                                    _currentMonth.month + 1, 1))
+                            ? () => setState(() => _currentMonth = DateTime(
+                                _currentMonth.year,
+                                _currentMonth.month + 1,
+                                1))
                             : null,
                       ),
                     ],
@@ -561,8 +632,7 @@ class _ShiftRequestScreenState extends State<ShiftRequestScreen> {
                         backgroundColor:
                             _isSubmitted ? Colors.green : Colors.teal,
                         foregroundColor: Colors.white,
-                        padding:
-                            const EdgeInsets.symmetric(vertical: 14),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(8),
                         ),
@@ -574,9 +644,7 @@ class _ShiftRequestScreenState extends State<ShiftRequestScreen> {
                               child: CircularProgressIndicator(
                                   color: Colors.white, strokeWidth: 2),
                             )
-                          : Icon(_isSubmitted
-                              ? Icons.refresh
-                              : Icons.send),
+                          : Icon(_isSubmitted ? Icons.refresh : Icons.send),
                       label: Text(_isSubmitting
                           ? '提出中...'
                           : _isSubmitted
@@ -591,6 +659,7 @@ class _ShiftRequestScreenState extends State<ShiftRequestScreen> {
 
   Widget _legend(Color bg, Color textColor, String label) {
     return Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
         Container(
           width: 14,

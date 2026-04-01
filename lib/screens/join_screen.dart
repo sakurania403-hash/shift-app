@@ -24,6 +24,10 @@ class _JoinScreenState extends State<JoinScreen> {
   Map<String, dynamic>? _invitation;
   String? _errorMessage;
 
+  // 現在ログイン済みかどうか
+  bool get _isAlreadyLoggedIn =>
+      Supabase.instance.client.auth.currentUser != null;
+
   @override
   void initState() {
     super.initState();
@@ -40,8 +44,8 @@ class _JoinScreenState extends State<JoinScreen> {
 
   Future<void> _loadInvitation() async {
     try {
-      final inv = await _invitationService
-          .getInvitationByToken(widget.token);
+      final inv =
+          await _invitationService.getInvitationByToken(widget.token);
       setState(() {
         _invitation = inv;
         _isLoading = false;
@@ -49,11 +53,45 @@ class _JoinScreenState extends State<JoinScreen> {
           _errorMessage = 'この招待URLは無効または期限切れです';
         }
       });
+
+      // ログイン済みの場合は自動で参加処理を実行
+      if (inv != null && _isAlreadyLoggedIn) {
+        await _joinAsCurrentUser();
+      }
     } catch (e) {
       setState(() {
         _invitation = null;
         _isLoading = false;
         _errorMessage = '招待情報の取得に失敗しました: $e';
+      });
+    }
+  }
+
+  // ログイン済みユーザーとしてそのまま店舗参加
+  Future<void> _joinAsCurrentUser() async {
+    if (_invitation == null) return;
+    setState(() => _isLoading = true);
+    try {
+      final storeId = _invitation!['store_id'] as String;
+      await _invitationService.joinStore(
+        token: widget.token,
+        storeId: storeId,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('店舗への参加が完了しました！'),
+            backgroundColor: Colors.teal,
+          ),
+        );
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const MainScreen()),
+        );
+      }
+    } catch (e) {
+      setState(() {
+        _errorMessage = '参加に失敗しました: $e';
+        _isLoading = false;
       });
     }
   }
@@ -115,8 +153,7 @@ class _JoinScreenState extends State<JoinScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(Icons.error_outline,
-                  size: 64, color: Colors.red),
+              const Icon(Icons.error_outline, size: 64, color: Colors.red),
               const SizedBox(height: 16),
               Text(
                 _errorMessage ?? '無効な招待URLです',
@@ -129,13 +166,49 @@ class _JoinScreenState extends State<JoinScreen> {
       );
     }
 
-    // storesがnullの場合も安全に処理
     final storesData = _invitation!['stores'];
     String storeName = '店舗';
     if (storesData != null && storesData is Map) {
       storeName = (storesData['name'] ?? '店舗').toString();
     }
 
+    // ログイン済みの場合はローディング表示（自動参加処理中）
+    if (_isAlreadyLoggedIn) {
+      return Scaffold(
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const CircularProgressIndicator(color: Colors.teal),
+              const SizedBox(height: 16),
+              Text(
+                '「$storeName」に参加しています...',
+                style: const TextStyle(fontSize: 16),
+              ),
+              if (_errorMessage != null) ...[
+                const SizedBox(height: 16),
+                Text(
+                  _errorMessage!,
+                  style: const TextStyle(color: Colors.red),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 16),
+                ElevatedButton(
+                  onPressed: _joinAsCurrentUser,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.teal,
+                    foregroundColor: Colors.white,
+                  ),
+                  child: const Text('再試行'),
+                ),
+              ],
+            ],
+          ),
+        ),
+      );
+    }
+
+    // 未ログインの場合は通常の参加フォームを表示
     return Scaffold(
       backgroundColor: Colors.grey[50],
       body: Center(
@@ -153,13 +226,11 @@ class _JoinScreenState extends State<JoinScreen> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.store,
-                        size: 64, color: Colors.teal),
+                    const Icon(Icons.store, size: 64, color: Colors.teal),
                     const SizedBox(height: 16),
                     Text(
                       '「$storeName」に参加する',
-                      style:
-                          Theme.of(context).textTheme.headlineSmall,
+                      style: Theme.of(context).textTheme.headlineSmall,
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 8),
@@ -225,9 +296,7 @@ class _JoinScreenState extends State<JoinScreen> {
                         child: _isLoading
                             ? const CircularProgressIndicator(
                                 color: Colors.white)
-                            : Text(_isLogin
-                                ? 'ログインして参加'
-                                : 'アカウント作成して参加'),
+                            : Text(_isLogin ? 'ログインして参加' : 'アカウント作成して参加'),
                       ),
                     ),
                     const SizedBox(height: 16),
