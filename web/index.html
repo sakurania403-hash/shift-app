@@ -13,9 +13,9 @@
   <title>shift_app</title>
   <link rel="manifest" href="manifest.json">
   <script>
-    // Flutterより先にURLを取得してwindowオブジェクトに保存
-    window.flutterInitialPath = window.location.pathname + window.location.search;
-    console.log('Initial path:', window.flutterInitialPath);
+    // ハッシュからinitialPathを取得して保存
+    window.flutterInitialHash = window.location.hash;
+    console.log('Initial hash:', window.flutterInitialHash);
   </script>
 </head>
 <body>

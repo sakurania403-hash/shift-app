@@ -14,19 +14,20 @@ Future<void> main() async {
     anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im12d3ljbGViYmFveXd5cnh1Z2ViIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ4MTEyMzgsImV4cCI6MjA5MDM4NzIzOH0.oGlisgR0rGA47F0tO4smgbxaW0wtQuSTFOF8bDMM4Mc',
   );
 
-  // window.flutterInitialPath からURLを取得
+  // ハッシュからトークンを取得: /#/join?invite=xxx
   String? joinToken;
   try {
-    final initialPath = html.window.location.href;
-    final uri = Uri.parse(initialPath);
-    debugPrint('initialPath: $initialPath');
-    debugPrint('uri.path: ${uri.path}');
-    debugPrint('invite: ${uri.queryParameters['invite']}');
-    if (uri.path == '/join') {
+    final hash = html.window.location.hash; // 例: #/join?invite=abc123
+    debugPrint('location.hash: $hash');
+    if (hash.startsWith('#/join')) {
+      // '#/join?invite=xxx' → '/join?invite=xxx' としてパース
+      final hashPath = hash.substring(1); // '#' を除去
+      final uri = Uri.parse(hashPath);
       joinToken = uri.queryParameters['invite'];
+      debugPrint('joinToken: $joinToken');
     }
   } catch (e) {
-    debugPrint('URL parse error: $e');
+    debugPrint('Hash parse error: $e');
   }
 
   runApp(MyApp(joinToken: joinToken));
