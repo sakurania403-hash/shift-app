@@ -6,6 +6,7 @@ import 'store_setup_screen.dart';
 import 'recruitment_screen.dart';
 import 'invite_screen.dart';
 import 'store_settings_screen.dart';
+import 'member_management_screen.dart';
 
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
@@ -51,7 +52,6 @@ class _MainScreenState extends State<MainScreen> {
     }
   }
 
-  // LinkedMap を安全に Map<String, dynamic> に変換
   Map<String, dynamic> _toMap(dynamic value) {
     if (value == null) return {};
     if (value is Map<String, dynamic>) return value;
@@ -80,6 +80,11 @@ class _MainScreenState extends State<MainScreen> {
         icon: Icon(Icons.event_note_outlined),
         selectedIcon: Icon(Icons.event_note),
         label: 'シフト募集',
+      ),
+      NavigationDestination(
+        icon: Icon(Icons.people_outline),
+        selectedIcon: Icon(Icons.people),
+        label: 'メンバー',
       ),
       NavigationDestination(
         icon: Icon(Icons.person_add_outlined),
@@ -117,8 +122,7 @@ class _MainScreenState extends State<MainScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.calendar_month,
-                size: 80, color: Colors.teal),
+            const Icon(Icons.calendar_month, size: 80, color: Colors.teal),
             const SizedBox(height: 24),
             Text(
               '所属店舗',
@@ -138,6 +142,7 @@ class _MainScreenState extends State<MainScreen> {
         ),
       ),
       const RecruitmentScreen(),
+      const MemberManagementScreen(),
       const InviteScreen(),
       const StoreSettingsScreen(),
     ];
@@ -147,8 +152,7 @@ class _MainScreenState extends State<MainScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.calendar_month,
-                size: 80, color: Colors.teal),
+            const Icon(Icons.calendar_month, size: 80, color: Colors.teal),
             const SizedBox(height: 24),
             Text(
               '所属店舗',
@@ -170,11 +174,9 @@ class _MainScreenState extends State<MainScreen> {
       const Center(child: Text('設定（実装予定）')),
     ];
 
-    final destinations =
-        _isAdmin ? adminDestinations : staffDestinations;
+    final destinations = _isAdmin ? adminDestinations : staffDestinations;
     final screens = _isAdmin ? adminScreens : staffScreens;
-    final currentIndex =
-        _selectedIndex >= screens.length ? 0 : _selectedIndex;
+    final currentIndex = _selectedIndex >= screens.length ? 0 : _selectedIndex;
 
     return Scaffold(
       appBar: AppBar(
@@ -193,8 +195,7 @@ class _MainScreenState extends State<MainScreen> {
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: currentIndex,
-        onDestinationSelected: (i) =>
-            setState(() => _selectedIndex = i),
+        onDestinationSelected: (i) => setState(() => _selectedIndex = i),
         destinations: destinations,
       ),
     );

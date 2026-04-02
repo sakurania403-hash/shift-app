@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../services/shift_service.dart';
 import '../services/store_settings_service.dart';
+import '../services/member_service.dart';
 
 class StaffConfirmedShiftScreen extends StatefulWidget {
   final Map<String, dynamic> recruitment;
@@ -23,11 +24,16 @@ class StaffConfirmedShiftScreen extends StatefulWidget {
 class _StaffConfirmedShiftScreenState
     extends State<StaffConfirmedShiftScreen> {
   final _shiftService = ShiftService();
-  List<Map<String, dynamic>> _confirmedShifts = [];
+  final _memberService = MemberService();
+
+  List<Map<String, dynamic>> _staff = [];
+  Map<String, Map<String, dynamic>> _confirmedMap = {};
+  Map<String, List<Map<String, dynamic>>> _tempShifts = {};
+  Map<String, bool> _holidayMap = {};
+  List<String> _tempRows = [];
   bool _isLoading = true;
   late DateTime _workStart;
   late DateTime _workEnd;
-  Map<String, bool> _holidayMap = {};
 
   @override
   void initState() {
@@ -40,24 +46,54 @@ class _StaffConfirmedShiftScreenState
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
     try {
-      final shifts = await _shiftService.getMyConfirmedShifts(
+      final members = await _shiftService.getStoreMembers(widget.storeId);
+      final shifts = await _shiftService.getConfirmedShifts(
         storeId: widget.storeId,
         from: _workStart,
         to: _workEnd,
       );
       final holidays = await StoreSettingsService.getJapaneseHolidays();
-
-      // 祝日マップを作成
       final holidayMap = <String, bool>{};
       for (var d in _dates) {
-        final isHoliday =
-            await StoreSettingsService.isHoliday(d, holidays);
+        final isHoliday = await StoreSettingsService.isHoliday(d, holidays);
         holidayMap[d.toIso8601String().substring(0, 10)] = isHoliday;
       }
 
+      final confirmedMap = <String, Map<String, dynamic>>{};
+      final tempMap = <String, List<Map<String, dynamic>>>{};
+      for (var c in shifts) {
+        final dateStr = c['date'].toString().substring(0, 10);
+        if (c['staff_type'] == 'temp') {
+          tempMap.putIfAbsent(dateStr, () => []).add(c);
+        } else if (c['user_id'] != null) {
+          final key = '${c['user_id']}_$dateStr';
+          confirmedMap[key] = c;
+        }
+      }
+
+      // store_temp_labelsからsort_order順でラベル取得
+      final tempLabels = await _memberService.getTempLabels(widget.storeId);
+      final registeredLabels =
+          tempLabels.map((e) => e['label'] as String).toList();
+      final allUsedLabels = <String>{};
+      for (var list in tempMap.values) {
+        for (var t in list) {
+          final label = (t['temp_label'] ?? '') as String;
+          if (label.isNotEmpty) allUsedLabels.add(label);
+        }
+      }
+      final unregistered = allUsedLabels
+          .where((l) => !registeredLabels.contains(l))
+          .toList()
+        ..sort();
+      final rows = [...registeredLabels, ...unregistered];
+
       setState(() {
-        _confirmedShifts = shifts;
+        _staff = members;
+        _confirmedMap = confirmedMap;
+        _tempShifts = tempMap;
         _holidayMap = holidayMap;
+        _tempRows = rows;
         _isLoading = false;
       });
     } catch (e) {
@@ -77,44 +113,41 @@ class _StaffConfirmedShiftScreenState
     return dates;
   }
 
-  Map<String, dynamic>? _getShift(String dateStr) {
-    final found = _confirmedShifts
-        .where((s) => s['date'].toString().substring(0, 10) == dateStr)
-        .toList();
-    return found.isNotEmpty ? found.first : null;
+  String _getCellText(String userId, String dateStr) {
+    final c = _confirmedMap['${userId}_$dateStr'];
+    if (c == null) return '';
+    final start = c['start_time']?.toString().substring(0, 5) ?? '';
+    if (c['is_last'] == true) return '$start\n~L';
+    final end = c['end_time']?.toString().substring(0, 5) ?? '';
+    return '$start\n~$end';
   }
 
-  // 合計勤務時間を計算（ラストは22時として計算）
-  double _calcTotalHours() {
-    double total = 0;
-    for (var s in _confirmedShifts) {
-      final start = s['start_time']?.toString().substring(0, 5);
-      if (start == null) continue;
-      final startParts = start.split(':');
-      final startH =
-          int.parse(startParts[0]) + int.parse(startParts[1]) / 60.0;
+  Color _getCellColor(String userId, String dateStr) {
+    return _confirmedMap.containsKey('${userId}_$dateStr')
+        ? Colors.teal[500]!
+        : Colors.white;
+  }
 
-      double endH;
-      if (s['is_last'] == true || s['end_time'] == null) {
-        endH = 22.0; // ラストは22時として計算
-      } else {
-        final end = s['end_time'].toString().substring(0, 5);
-        final endParts = end.split(':');
-        endH =
-            int.parse(endParts[0]) + int.parse(endParts[1]) / 60.0;
-      }
-      total += endH - startH;
+  Color _getCellTextColor(String userId, String dateStr) {
+    return _confirmedMap.containsKey('${userId}_$dateStr')
+        ? Colors.white
+        : Colors.grey[300]!;
+  }
+
+  int _confirmedCount(String dateStr) {
+    int count = 0;
+    for (var key in _confirmedMap.keys) {
+      if (key.endsWith('_$dateStr')) count++;
     }
-    return total;
+    count += (_tempShifts[dateStr]?.length ?? 0);
+    return count;
   }
 
   @override
   Widget build(BuildContext context) {
-    final fmt = DateFormat('M/d(E)', 'ja');
-    final fmtMonth = DateFormat('yyyy年M月', 'ja');
     final dates = _dates;
-    final totalHours = _calcTotalHours();
-    final confirmedDays = _confirmedShifts.length;
+    final fmt = DateFormat('M/d', 'ja');
+    final fmtDay = DateFormat('E', 'ja');
 
     return Scaffold(
       appBar: AppBar(
@@ -131,70 +164,28 @@ class _StaffConfirmedShiftScreenState
           ? const Center(child: CircularProgressIndicator())
           : Column(
               children: [
-                // サマリーカード
                 Container(
                   width: double.infinity,
-                  margin: const EdgeInsets.all(12),
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.teal[50],
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.teal[200]!),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        widget.storeName,
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: Colors.teal[700],
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        '${DateFormat('yyyy/MM/dd').format(_workStart)} 〜 ${DateFormat('yyyy/MM/dd').format(_workEnd)}',
-                        style: const TextStyle(fontSize: 13),
-                      ),
-                      const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          _summaryItem(
-                            Icons.calendar_today,
-                            '$confirmedDays日',
-                            '確定日数',
-                            Colors.teal,
-                          ),
-                          const SizedBox(width: 24),
-                          _summaryItem(
-                            Icons.access_time,
-                            confirmedDays == 0
-                                ? '0時間'
-                                : '${totalHours.toStringAsFixed(1)}h',
-                            'ラスト除く目安',
-                            Colors.blue,
-                          ),
-                        ],
-                      ),
-                    ],
+                  padding: const EdgeInsets.all(12),
+                  color: Colors.teal[50],
+                  child: Text(
+                    '勤務期間：${DateFormat('yyyy/MM/dd').format(_workStart)} 〜 ${DateFormat('yyyy/MM/dd').format(_workEnd)}',
+                    style: const TextStyle(fontSize: 13),
                   ),
                 ),
-                // 凡例
                 Padding(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 4),
+                      horizontal: 12, vertical: 6),
                   child: Row(
                     children: [
-                      _legend(Colors.teal[500]!, '確定済み'),
-                      const SizedBox(width: 16),
-                      _legend(Colors.grey[200]!, '未確定'),
+                      _legend(Colors.teal[500]!, Colors.white, '確定済み'),
+                      const SizedBox(width: 12),
+                      _legend(Colors.orange[400]!, Colors.white, 'ヘルプ等'),
                     ],
                   ),
                 ),
-                // シフトリスト
                 Expanded(
-                  child: confirmedDays == 0
+                  child: _staff.isEmpty && _tempRows.isEmpty
                       ? Center(
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
@@ -210,123 +201,278 @@ class _StaffConfirmedShiftScreenState
                             ],
                           ),
                         )
-                      : ListView.builder(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 4),
-                          itemCount: dates.length,
-                          itemBuilder: (context, index) {
-                            final date = dates[index];
-                            final dateStr =
-                                date.toIso8601String().substring(0, 10);
-                            final shift = _getShift(dateStr);
-                            final isHoliday =
-                                _holidayMap[dateStr] ?? false;
-                            final isSunday =
-                                date.weekday == DateTime.sunday;
-                            final isSaturday =
-                                date.weekday == DateTime.saturday;
-                            final isRed =
-                                isSunday || isHoliday;
-                            final isBlue = isSaturday && !isHoliday;
-
-                            // 月の区切り
-                            final showMonthHeader = index == 0 ||
-                                dates[index - 1].month != date.month;
-
-                            return Column(
+                      : SingleChildScrollView(
+                          scrollDirection: Axis.vertical,
+                          child: SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                if (showMonthHeader)
-                                  Padding(
-                                    padding: const EdgeInsets.only(
-                                        top: 8, bottom: 4, left: 4),
-                                    child: Text(
-                                      fmtMonth.format(date),
-                                      style: TextStyle(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.grey[600],
-                                      ),
-                                    ),
-                                  ),
-                                Container(
-                                  margin:
-                                      const EdgeInsets.only(bottom: 6),
-                                  decoration: BoxDecoration(
-                                    color: shift != null
-                                        ? Colors.teal[50]
-                                        : Colors.grey[50],
-                                    borderRadius:
-                                        BorderRadius.circular(10),
-                                    border: Border.all(
-                                      color: shift != null
-                                          ? Colors.teal[200]!
-                                          : Colors.grey[200]!,
-                                    ),
-                                  ),
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 12, vertical: 10),
-                                    child: Row(
-                                      children: [
-                                        // 日付
-                                        SizedBox(
-                                          width: 80,
-                                          child: Text(
-                                            fmt.format(date),
-                                            style: TextStyle(
-                                              fontSize: 13,
-                                              fontWeight: FontWeight.w600,
-                                              color: isRed
-                                                  ? Colors.red
-                                                  : isBlue
-                                                      ? Colors.blue
-                                                      : Colors.black87,
-                                            ),
-                                          ),
+                                Row(
+                                  children: [
+                                    _headerCell('スタッフ', 70, 68),
+                                    ...dates.map((date) {
+                                      final weekday = date.weekday;
+                                      final isSunday =
+                                          weekday == DateTime.sunday;
+                                      final isSaturday =
+                                          weekday == DateTime.saturday;
+                                      final dateStr = date
+                                          .toIso8601String()
+                                          .substring(0, 10);
+                                      final isHoliday =
+                                          _holidayMap[dateStr] ?? false;
+                                      final isRed = isSunday || isHoliday;
+                                      final isBlue = isSaturday && !isHoliday;
+                                      final confirmedCnt =
+                                          _confirmedCount(dateStr);
+
+                                      return Container(
+                                        width: 62,
+                                        height: 68,
+                                        decoration: BoxDecoration(
+                                          color: isRed
+                                              ? Colors.red[50]
+                                              : isBlue
+                                                  ? Colors.blue[50]
+                                                  : Colors.grey[100],
+                                          border: Border.all(
+                                              color: Colors.grey[300]!,
+                                              width: 0.5),
                                         ),
-                                        // 祝日ラベル
-                                        if (isHoliday)
-                                          Container(
-                                            margin: const EdgeInsets.only(
-                                                right: 8),
-                                            padding:
-                                                const EdgeInsets.symmetric(
-                                                    horizontal: 6,
-                                                    vertical: 2),
+                                        alignment: Alignment.center,
+                                        child: Column(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.center,
+                                          children: [
+                                            Text(
+                                              fmt.format(date),
+                                              style: TextStyle(
+                                                fontSize: 10,
+                                                fontWeight: FontWeight.bold,
+                                                color: isRed
+                                                    ? Colors.red
+                                                    : isBlue
+                                                        ? Colors.blue
+                                                        : Colors.black87,
+                                              ),
+                                            ),
+                                            Text(
+                                              fmtDay.format(date),
+                                              style: TextStyle(
+                                                fontSize: 9,
+                                                color: isRed
+                                                    ? Colors.red
+                                                    : isBlue
+                                                        ? Colors.blue
+                                                        : Colors.grey[600],
+                                              ),
+                                            ),
+                                            const SizedBox(height: 4),
+                                            if (confirmedCnt > 0)
+                                              Container(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                        horizontal: 4,
+                                                        vertical: 2),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.teal[600],
+                                                  borderRadius:
+                                                      BorderRadius.circular(4),
+                                                ),
+                                                child: Row(
+                                                  mainAxisSize:
+                                                      MainAxisSize.min,
+                                                  children: [
+                                                    const Icon(Icons.people,
+                                                        size: 8,
+                                                        color: Colors.white),
+                                                    const SizedBox(width: 2),
+                                                    Text(
+                                                      '$confirmedCnt人確定',
+                                                      style: const TextStyle(
+                                                        fontSize: 7,
+                                                        color: Colors.white,
+                                                        fontWeight:
+                                                            FontWeight.bold,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                          ],
+                                        ),
+                                      );
+                                    }),
+                                  ],
+                                ),
+                                ..._staff.map((m) {
+                                  final profile = Map<String, dynamic>.from(
+                                      m['user_profiles'] as Map);
+                                  final userId = profile['id'] as String;
+                                  final name = profile['name'] as String;
+
+                                  return Row(
+                                    children: [
+                                      Container(
+                                        width: 70,
+                                        height: 52,
+                                        decoration: BoxDecoration(
+                                          color: Colors.teal[50],
+                                          border: Border.all(
+                                              color: Colors.grey[300]!,
+                                              width: 0.5),
+                                        ),
+                                        alignment: Alignment.center,
+                                        padding: const EdgeInsets.all(4),
+                                        child: Text(
+                                          name,
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w500,
+                                            color: Colors.teal[800],
+                                          ),
+                                          textAlign: TextAlign.center,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                      ...dates.map((date) {
+                                        final dateStr = date
+                                            .toIso8601String()
+                                            .substring(0, 10);
+                                        return Container(
+                                          width: 62,
+                                          height: 52,
+                                          decoration: BoxDecoration(
+                                            color:
+                                                _getCellColor(userId, dateStr),
+                                            border: Border.all(
+                                                color: Colors.grey[200]!,
+                                                width: 0.5),
+                                          ),
+                                          alignment: Alignment.center,
+                                          child: Text(
+                                            _getCellText(userId, dateStr),
+                                            style: TextStyle(
+                                              fontSize: 8,
+                                              color: _getCellTextColor(
+                                                  userId, dateStr),
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                            textAlign: TextAlign.center,
+                                          ),
+                                        );
+                                      }),
+                                    ],
+                                  );
+                                }),
+                                if (_tempRows.isNotEmpty)
+                                  Container(
+                                    height: 2,
+                                    color: Colors.orange[200],
+                                  ),
+                                ..._tempRows.map((label) {
+                                  final isTimee = label.startsWith('タイミー');
+                                  return Row(
+                                    children: [
+                                      Container(
+                                        width: 70,
+                                        height: 44,
+                                        decoration: BoxDecoration(
+                                          color: Colors.orange[50],
+                                          border: Border.all(
+                                              color: Colors.grey[300]!,
+                                              width: 0.5),
+                                        ),
+                                        alignment: Alignment.center,
+                                        padding: const EdgeInsets.all(4),
+                                        child: Text(
+                                          label,
+                                          style: TextStyle(
+                                            fontSize: 10,
+                                            color: isTimee
+                                                ? Colors.orange[700]
+                                                : Colors.deepOrange[700],
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                          textAlign: TextAlign.center,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                      ...dates.map((date) {
+                                        final dateStr = date
+                                            .toIso8601String()
+                                            .substring(0, 10);
+                                        final temps =
+                                            _tempShifts[dateStr] ?? [];
+                                        final temp = temps.firstWhere(
+                                          (t) =>
+                                              (t['temp_label'] ?? '') == label,
+                                          orElse: () => {},
+                                        );
+
+                                        if (temp.isEmpty) {
+                                          return Container(
+                                            width: 62,
+                                            height: 44,
                                             decoration: BoxDecoration(
-                                              color: Colors.red[50],
-                                              borderRadius:
-                                                  BorderRadius.circular(4),
+                                              color: Colors.white,
                                               border: Border.all(
-                                                  color: Colors.red[200]!),
+                                                  color: Colors.grey[200]!,
+                                                  width: 0.5),
+                                            ),
+                                          );
+                                        }
+
+                                        final start = temp['start_time']
+                                                ?.toString()
+                                                .substring(0, 5) ??
+                                            '';
+                                        final isLast = temp['is_last'] == true;
+                                        final end = isLast
+                                            ? 'L'
+                                            : temp['end_time']
+                                                    ?.toString()
+                                                    .substring(0, 5) ??
+                                                '';
+
+                                        return Container(
+                                          width: 62,
+                                          height: 44,
+                                          decoration: BoxDecoration(
+                                            color: Colors.orange[50],
+                                            border: Border.all(
+                                                color: Colors.grey[200]!,
+                                                width: 0.5),
+                                          ),
+                                          alignment: Alignment.center,
+                                          child: Container(
+                                            margin: const EdgeInsets.all(2),
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 2, vertical: 1),
+                                            decoration: BoxDecoration(
+                                              color: Colors.orange[400],
+                                              borderRadius:
+                                                  BorderRadius.circular(3),
                                             ),
                                             child: Text(
-                                              '祝',
-                                              style: TextStyle(
-                                                  fontSize: 10,
-                                                  color: Colors.red[400]),
+                                              '$start\n~$end',
+                                              style: const TextStyle(
+                                                fontSize: 7,
+                                                color: Colors.white,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                              textAlign: TextAlign.center,
                                             ),
                                           ),
-                                        // シフト内容
-                                        Expanded(
-                                          child: shift != null
-                                              ? _buildShiftBar(shift)
-                                              : Text(
-                                                  '未確定',
-                                                  style: TextStyle(
-                                                    fontSize: 12,
-                                                    color: Colors.grey[400],
-                                                  ),
-                                                ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
+                                        );
+                                      }),
+                                    ],
+                                  );
+                                }),
                               ],
-                            );
-                          },
+                            ),
+                          ),
                         ),
                 ),
               ],
@@ -334,93 +480,33 @@ class _StaffConfirmedShiftScreenState
     );
   }
 
-  Widget _buildShiftBar(Map<String, dynamic> shift) {
-    final start =
-        shift['start_time']?.toString().substring(0, 5) ?? '';
-    final isLast = shift['is_last'] == true;
-    final end = isLast
-        ? 'ラスト'
-        : shift['end_time']?.toString().substring(0, 5) ?? '';
-
-    return Row(
-      children: [
-        Container(
-          padding:
-              const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-          decoration: BoxDecoration(
-            color: Colors.teal[500],
-            borderRadius: BorderRadius.circular(6),
-          ),
-          child: Text(
-            '$start 〜 $end',
-            style: const TextStyle(
-              fontSize: 13,
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-        ),
-        if (isLast)
-          Padding(
-            padding: const EdgeInsets.only(left: 6),
-            child: Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-              decoration: BoxDecoration(
-                color: Colors.orange[100],
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: Text(
-                'L',
-                style: TextStyle(
-                  fontSize: 11,
-                  color: Colors.orange[800],
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-          ),
-      ],
+  Widget _headerCell(String text, double width, double height) {
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        color: Colors.grey[100],
+        border: Border.all(color: Colors.grey[300]!, width: 0.5),
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        text,
+        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+      ),
     );
   }
 
-  Widget _summaryItem(
-      IconData icon, String value, String label, Color color) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Icon(icon, size: 16, color: color),
-            const SizedBox(width: 4),
-            Text(
-              value,
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: color,
-              ),
-            ),
-          ],
-        ),
-        Text(
-          label,
-          style: TextStyle(fontSize: 11, color: Colors.grey[600]),
-        ),
-      ],
-    );
-  }
-
-  Widget _legend(Color color, String label) {
+  Widget _legend(Color bg, Color textColor, String label) {
     return Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
         Container(
           width: 14,
           height: 14,
           decoration: BoxDecoration(
-            color: color,
-            borderRadius: BorderRadius.circular(2),
+            color: bg,
             border: Border.all(color: Colors.grey[300]!),
+            borderRadius: BorderRadius.circular(2),
           ),
         ),
         const SizedBox(width: 4),

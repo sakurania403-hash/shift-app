@@ -5,22 +5,23 @@ class AdminShiftService {
  
   // 店舗の全メンバーを取得（管理者を先頭に）
   Future<List<Map<String, dynamic>>> getStoreStaff(String storeId) async {
-    final result = await _supabase
-        .from('store_memberships')
-        .select('user_id, role, hourly_wage, user_profiles(id, name, email)')
-        .eq('store_id', storeId)
-        .order('created_at');
- 
-    final members = List<Map<String, dynamic>>.from(result);
- 
-    members.sort((a, b) {
-      if (a['role'] == 'admin' && b['role'] != 'admin') return -1;
-      if (a['role'] != 'admin' && b['role'] == 'admin') return 1;
-      return 0;
-    });
- 
-    return members;
-  }
+  final result = await _supabase
+      .from('store_memberships')
+      .select('user_id, role, hourly_wage, sort_order, user_profiles(id, name, email)')
+      .eq('store_id', storeId)
+      .order('sort_order', ascending: true);
+
+  final members = List<Map<String, dynamic>>.from(result);
+
+  // Dart側でも念のためソート
+  members.sort((a, b) {
+    final aOrder = (a['sort_order'] as num?)?.toInt() ?? 9999;
+    final bOrder = (b['sort_order'] as num?)?.toInt() ?? 9999;
+    return aOrder.compareTo(bOrder);
+  });
+
+  return members;
+}
  
   // 募集に対する全メンバーの提出済み希望シフトを取得
   Future<List<Map<String, dynamic>>> getAllShiftRequests({

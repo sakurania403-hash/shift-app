@@ -5,6 +5,7 @@ import 'package:flutter/rendering.dart';
 import 'dart:ui' as ui;
 import 'package:intl/intl.dart';
 import '../services/admin_shift_service.dart';
+import '../services/member_service.dart';
 import 'shift_timeline_screen.dart';
 
 class AdminShiftOverviewScreen extends StatefulWidget {
@@ -25,6 +26,7 @@ class AdminShiftOverviewScreen extends StatefulWidget {
 class _AdminShiftOverviewScreenState
     extends State<AdminShiftOverviewScreen> {
   final _service = AdminShiftService();
+  final _memberService = MemberService();
   final _repaintKey = GlobalKey();
 
   List<Map<String, dynamic>> _staff = [];
@@ -33,6 +35,7 @@ class _AdminShiftOverviewScreenState
   Map<String, Map<String, dynamic>> _confirmedShifts = {};
   Map<String, List<Map<String, dynamic>>> _tempShifts = {};
   List<Map<String, dynamic>> _submissions = [];
+  List<String> _tempRows = [];
   bool _isLoading = true;
   bool _isSaving = false;
   late DateTime _workStart;
@@ -67,6 +70,8 @@ class _AdminShiftOverviewScreenState
         from: _workStart,
         to: _workEnd,
       );
+      final tempLabels = await _memberService.getTempLabels(widget.storeId);
+      debugPrint('tempLabels order: ${tempLabels.map((e) => e['label']).toList()}'); // デバッグ
 
       final shiftMap = <String, Map<String, dynamic>>{};
       for (var s in shifts) {
@@ -92,6 +97,24 @@ class _AdminShiftOverviewScreenState
         }
       }
 
+      final registeredLabels =
+          tempLabels.map((e) => e['label'] as String).toList();
+      debugPrint('registeredLabels: $registeredLabels'); // デバッグ
+
+      final allUsedLabels = <String>{};
+      for (var list in tempMap.values) {
+        for (var t in list) {
+          final label = (t['temp_label'] ?? '') as String;
+          if (label.isNotEmpty) allUsedLabels.add(label);
+        }
+      }
+      final unregistered = allUsedLabels
+          .where((l) => !registeredLabels.contains(l))
+          .toList()
+        ..sort();
+      final rows = [...registeredLabels, ...unregistered];
+      debugPrint('final rows: $rows'); // デバッグ
+
       setState(() {
         _staff = staff;
         _shiftRequests = shiftMap;
@@ -99,6 +122,7 @@ class _AdminShiftOverviewScreenState
         _confirmedShifts = confirmedMap;
         _tempShifts = tempMap;
         _submissions = submissions;
+        _tempRows = rows;
         _isLoading = false;
       });
     } catch (e) {
@@ -116,37 +140,6 @@ class _AdminShiftOverviewScreenState
       d = d.add(const Duration(days: 1));
     }
     return dates;
-  }
-
-  /// 全日付にまたがるヘルプ等の「行」リストを生成
-  /// タイミー（「タイミー」で始まるラベル）を数字順で先、ヘルプ（それ以外）を後ろに
-  List<String> get _tempRows {
-    final allLabels = <String>{};
-    for (var list in _tempShifts.values) {
-      for (var t in list) {
-        final label = (t['temp_label'] ?? '') as String;
-        if (label.isNotEmpty) allLabels.add(label);
-      }
-    }
-
-    final timeeLabels = allLabels
-        .where((l) => l.startsWith('タイミー'))
-        .toList()
-      ..sort((a, b) {
-        // 「タイミー1」「タイミー2」... の数字部分で並び替え
-        final aNum =
-            int.tryParse(a.replaceAll('タイミー', '').trim()) ?? 9999;
-        final bNum =
-            int.tryParse(b.replaceAll('タイミー', '').trim()) ?? 9999;
-        return aNum.compareTo(bNum);
-      });
-
-    final helpLabels = allLabels
-        .where((l) => !l.startsWith('タイミー'))
-        .toList()
-      ..sort();
-
-    return [...timeeLabels, ...helpLabels];
   }
 
   bool _isSubmitted(String userId) {
@@ -184,8 +177,7 @@ class _AdminShiftOverviewScreenState
     final start =
         shift['preferred_start']?.toString().substring(0, 5) ?? '';
     if (shift['is_last'] == true) return '$start\n~L';
-    final end =
-        shift['preferred_end']?.toString().substring(0, 5) ?? '';
+    final end = shift['preferred_end']?.toString().substring(0, 5) ?? '';
     if (start.isEmpty) return '○';
     return '$start\n~$end';
   }
@@ -237,8 +229,8 @@ class _AdminShiftOverviewScreenState
 
       final title = widget.recruitment['title'] ?? 'shift';
       html.AnchorElement(href: dataUrl)
-  ..setAttribute('download', '$title.png')
-  ..click();
+        ..setAttribute('download', '$title.png')
+        ..click();
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -267,7 +259,6 @@ class _AdminShiftOverviewScreenState
     final dates = _dates;
     final fmt = DateFormat('M/d', 'ja');
     final fmtDay = DateFormat('E', 'ja');
-    final tempRows = _tempRows;
 
     return Scaffold(
       appBar: AppBar(
@@ -284,7 +275,6 @@ class _AdminShiftOverviewScreenState
           ? const Center(child: CircularProgressIndicator())
           : Column(
               children: [
-                // サマリーヘッダー
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(12),
@@ -307,8 +297,8 @@ class _AdminShiftOverviewScreenState
                         spacing: 8,
                         runSpacing: 4,
                         children: _staff.map((m) {
-                          final profile = m['user_profiles']
-                              as Map<String, dynamic>;
+                          final profile =
+                              m['user_profiles'] as Map<String, dynamic>;
                           final userId = profile['id'] as String;
                           final name = profile['name'] as String;
                           final submitted = _isSubmitted(userId);
@@ -333,7 +323,6 @@ class _AdminShiftOverviewScreenState
                     ],
                   ),
                 ),
-                // 凡例 + シフト共有ボタン
                 Padding(
                   padding: const EdgeInsets.symmetric(
                       horizontal: 12, vertical: 6),
@@ -344,16 +333,15 @@ class _AdminShiftOverviewScreenState
                           spacing: 12,
                           runSpacing: 4,
                           children: [
+                            _legend(Colors.teal[500]!, Colors.white, '確定済み'),
                             _legend(
-                                Colors.teal[500]!, Colors.white, '確定済み'),
-                            _legend(Colors.teal[50]!, Colors.teal[700]!,
-                                '出勤希望'),
+                                Colors.teal[50]!, Colors.teal[700]!, '出勤希望'),
                             _legend(
                                 Colors.red[50]!, Colors.red[400]!, '希望休'),
                             _legend(
                                 Colors.white, Colors.grey[400]!, '未提出'),
-                            _legend(Colors.orange[400]!, Colors.white,
-                                'ヘルプ等'),
+                            _legend(
+                                Colors.orange[400]!, Colors.white, 'ヘルプ等'),
                           ],
                         ),
                       ),
@@ -380,7 +368,6 @@ class _AdminShiftOverviewScreenState
                     ],
                   ),
                 ),
-                // シフト表本体
                 Expanded(
                   child: _staff.isEmpty
                       ? const Center(child: Text('スタッフがいません'))
@@ -396,7 +383,6 @@ class _AdminShiftOverviewScreenState
                                   crossAxisAlignment:
                                       CrossAxisAlignment.start,
                                   children: [
-                                    // ヘッダー行
                                     Row(
                                       children: [
                                         _headerCell('スタッフ', 70, 68),
@@ -481,10 +467,10 @@ class _AdminShiftOverviewScreenState
                                                   ),
                                                   const SizedBox(height: 4),
                                                   Container(
-                                                    padding: const EdgeInsets
-                                                        .symmetric(
-                                                        horizontal: 4,
-                                                        vertical: 2),
+                                                    padding:
+                                                        const EdgeInsets.symmetric(
+                                                            horizontal: 4,
+                                                            vertical: 2),
                                                     decoration: BoxDecoration(
                                                       color: confirmedCnt > 0
                                                           ? Colors.teal[600]
@@ -505,7 +491,8 @@ class _AdminShiftOverviewScreenState
                                                           confirmedCnt > 0
                                                               ? '$confirmedCnt人確定'
                                                               : '人員確認',
-                                                          style: const TextStyle(
+                                                          style:
+                                                              const TextStyle(
                                                             fontSize: 7,
                                                             color: Colors.white,
                                                             fontWeight:
@@ -522,7 +509,6 @@ class _AdminShiftOverviewScreenState
                                         }),
                                       ],
                                     ),
-                                    // スタッフ行（管理者も含め全員薄緑）
                                     ..._staff.map((m) {
                                       final profile = m['user_profiles']
                                           as Map<String, dynamic>;
@@ -531,7 +517,6 @@ class _AdminShiftOverviewScreenState
 
                                       return Row(
                                         children: [
-                                          // 名前セル（管理者・スタッフ問わず薄緑）
                                           Container(
                                             width: 70,
                                             height: 52,
@@ -542,8 +527,7 @@ class _AdminShiftOverviewScreenState
                                                   width: 0.5),
                                             ),
                                             alignment: Alignment.center,
-                                            padding:
-                                                const EdgeInsets.all(4),
+                                            padding: const EdgeInsets.all(4),
                                             child: Text(
                                               name,
                                               style: TextStyle(
@@ -585,19 +569,16 @@ class _AdminShiftOverviewScreenState
                                         ],
                                       );
                                     }),
-                                    // 区切り線
-                                    if (tempRows.isNotEmpty)
+                                    if (_tempRows.isNotEmpty)
                                       Container(
                                         height: 2,
                                         color: Colors.orange[200],
                                       ),
-                                    // ヘルプ等：ラベルごとに1行
-                                    ...tempRows.map((label) {
+                                    ..._tempRows.map((label) {
                                       final isTimee =
                                           label.startsWith('タイミー');
                                       return Row(
                                         children: [
-                                          // 名前セル
                                           Container(
                                             width: 70,
                                             height: 44,
@@ -608,8 +589,7 @@ class _AdminShiftOverviewScreenState
                                                   width: 0.5),
                                             ),
                                             alignment: Alignment.center,
-                                            padding:
-                                                const EdgeInsets.all(4),
+                                            padding: const EdgeInsets.all(4),
                                             child: Text(
                                               label,
                                               style: TextStyle(
@@ -623,14 +603,12 @@ class _AdminShiftOverviewScreenState
                                               overflow: TextOverflow.ellipsis,
                                             ),
                                           ),
-                                          // 日付ごとのセル
                                           ...dates.map((date) {
                                             final dateStr = date
                                                 .toIso8601String()
                                                 .substring(0, 10);
                                             final temps =
                                                 _tempShifts[dateStr] ?? [];
-                                            // このラベルに一致するシフトを探す
                                             final temp = temps.firstWhere(
                                               (t) =>
                                                   (t['temp_label'] ?? '') ==
@@ -675,7 +653,8 @@ class _AdminShiftOverviewScreenState
                                               ),
                                               alignment: Alignment.center,
                                               child: Container(
-                                                margin: const EdgeInsets.all(2),
+                                                margin:
+                                                    const EdgeInsets.all(2),
                                                 padding:
                                                     const EdgeInsets.symmetric(
                                                         horizontal: 2,
@@ -723,10 +702,7 @@ class _AdminShiftOverviewScreenState
       alignment: Alignment.center,
       child: Text(
         text,
-        style: const TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.bold,
-        ),
+        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
       ),
     );
   }

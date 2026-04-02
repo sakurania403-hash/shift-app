@@ -110,7 +110,7 @@ class ShiftService {
     final userId = _supabase.auth.currentUser!.id;
     final result = await _supabase
         .from('shifts')
-        .select()
+        .select('*, user_profiles(id, name)')
         .eq('store_id', storeId)
         .eq('user_id', userId)
         .eq('status', 'confirmed')
@@ -118,5 +118,22 @@ class ShiftService {
         .lte('date', to.toIso8601String().substring(0, 10))
         .order('date');
     return List<Map<String, dynamic>>.from(result);
+  }
+
+  // 店舗の全メンバーを取得（sort_order順）
+  Future<List<Map<String, dynamic>>> getStoreMembers(String storeId) async {
+    final result = await _supabase
+        .from('store_memberships')
+        .select('user_id, role, sort_order, user_profiles(id, name)')
+        .eq('store_id', storeId)
+        .order('sort_order', ascending: true);
+
+    final members = List<Map<String, dynamic>>.from(result);
+    members.sort((a, b) {
+      final aOrder = (a['sort_order'] as num?)?.toInt() ?? 9999;
+      final bOrder = (b['sort_order'] as num?)?.toInt() ?? 9999;
+      return aOrder.compareTo(bOrder);
+    });
+    return members;
   }
 }
