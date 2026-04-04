@@ -41,6 +41,9 @@ class _AdminShiftOverviewScreenState
   late DateTime _workStart;
   late DateTime _workEnd;
 
+  // 募集が open かどうか（再募集中は希望を優先表示）
+  bool get _isOpen => widget.recruitment['status'] == 'open';
+
   @override
   void initState() {
     super.initState();
@@ -70,8 +73,8 @@ class _AdminShiftOverviewScreenState
         from: _workStart,
         to: _workEnd,
       );
-      final tempLabels = await _memberService.getTempLabels(widget.storeId);
-      debugPrint('tempLabels order: ${tempLabels.map((e) => e['label']).toList()}'); // デバッグ
+      final tempLabels =
+          await _memberService.getTempLabels(widget.storeId);
 
       final shiftMap = <String, Map<String, dynamic>>{};
       for (var s in shifts) {
@@ -99,8 +102,6 @@ class _AdminShiftOverviewScreenState
 
       final registeredLabels =
           tempLabels.map((e) => e['label'] as String).toList();
-      debugPrint('registeredLabels: $registeredLabels'); // デバッグ
-
       final allUsedLabels = <String>{};
       for (var list in tempMap.values) {
         for (var t in list) {
@@ -113,7 +114,6 @@ class _AdminShiftOverviewScreenState
           .toList()
         ..sort();
       final rows = [...registeredLabels, ...unregistered];
-      debugPrint('final rows: $rows'); // デバッグ
 
       setState(() {
         _staff = staff;
@@ -134,7 +134,8 @@ class _AdminShiftOverviewScreenState
   List<DateTime> get _dates {
     final dates = <DateTime>[];
     var d = DateTime(_workStart.year, _workStart.month, _workStart.day);
-    final end = DateTime(_workEnd.year, _workEnd.month, _workEnd.day);
+    final end =
+        DateTime(_workEnd.year, _workEnd.month, _workEnd.day);
     while (!d.isAfter(end)) {
       dates.add(d);
       d = d.add(const Duration(days: 1));
@@ -142,60 +143,126 @@ class _AdminShiftOverviewScreenState
     return dates;
   }
 
-  bool _isSubmitted(String userId) {
-    return _submissions.any((s) => s['user_id'] == userId);
-  }
+  bool _isSubmitted(String userId) =>
+      _submissions.any((s) => s['user_id'] == userId);
 
-  bool _isConfirmed(String userId, String dateStr) {
-    return _confirmedShifts.containsKey('${userId}_$dateStr');
-  }
+  bool _isConfirmed(String userId, String dateStr) =>
+      _confirmedShifts.containsKey('${userId}_$dateStr');
 
   int _confirmedCount(String dateStr) {
     int count = 0;
     for (var m in _staff) {
-      final profile = m['user_profiles'] as Map<String, dynamic>;
+      final profile =
+          m['user_profiles'] as Map<String, dynamic>;
       final userId = profile['id'] as String;
-      if (_confirmedShifts.containsKey('${userId}_$dateStr')) count++;
+      if (_confirmedShifts.containsKey('${userId}_$dateStr'))
+        count++;
     }
     count += (_tempShifts[dateStr]?.length ?? 0);
     return count;
   }
 
+  // ─── セルテキスト ────────────────────────────────────────────
+  // open（再募集中）の場合：希望シフト → 確定シフト の優先順
+  // closed（締切）の場合：確定シフト → 希望シフト の優先順（従来通り）
   String _getCellText(String userId, String dateStr) {
     final confirmedKey = '${userId}_$dateStr';
-    if (_confirmedShifts.containsKey(confirmedKey)) {
-      final c = _confirmedShifts[confirmedKey]!;
-      final start = c['start_time']?.toString().substring(0, 5) ?? '';
-      if (c['is_last'] == true) return '$start\n~L';
-      final end = c['end_time']?.toString().substring(0, 5) ?? '';
-      return '$start\n~$end';
+    final hasConfirmed = _confirmedShifts.containsKey(confirmedKey);
+    final shift = _shiftRequests['${userId}_$dateStr'];
+    final hasDayOff = _dayOffRequests.containsKey('${userId}_$dateStr');
+
+    if (_isOpen) {
+      // 再募集中：希望シフトを優先表示
+      if (hasDayOff) return '休';
+      if (shift != null) {
+        final start =
+            shift['preferred_start']?.toString().substring(0, 5) ?? '';
+        if (shift['is_last'] == true) {
+          return start.isEmpty ? 'L' : '$start\n~L';
+        }
+        final end =
+            shift['preferred_end']?.toString().substring(0, 5) ?? '';
+        if (start.isEmpty) return '○';
+        return '$start\n~$end';
+      }
+      // 希望がなければ確定シフトを表示
+      if (hasConfirmed) {
+        final c = _confirmedShifts[confirmedKey]!;
+        final start =
+            c['start_time']?.toString().substring(0, 5) ?? '';
+        if (c['is_last'] == true) return '$start\n~L';
+        final end = c['end_time']?.toString().substring(0, 5) ?? '';
+        return '$start\n~$end';
+      }
+      return '';
+    } else {
+      // 締切済み：確定シフトを優先表示（従来通り）
+      if (hasConfirmed) {
+        final c = _confirmedShifts[confirmedKey]!;
+        final start =
+            c['start_time']?.toString().substring(0, 5) ?? '';
+        if (c['is_last'] == true) return '$start\n~L';
+        final end = c['end_time']?.toString().substring(0, 5) ?? '';
+        return '$start\n~$end';
+      }
+      if (hasDayOff) return '休';
+      if (shift != null) {
+        final start =
+            shift['preferred_start']?.toString().substring(0, 5) ??
+                '';
+        if (shift['is_last'] == true) {
+          return start.isEmpty ? 'L' : '$start\n~L';
+        }
+        final end =
+            shift['preferred_end']?.toString().substring(0, 5) ?? '';
+        if (start.isEmpty) return '○';
+        return '$start\n~$end';
+      }
+      return '';
     }
-    final key = '${userId}_$dateStr';
-    if (_dayOffRequests.containsKey(key)) return '休';
-    final shift = _shiftRequests[key];
-    if (shift == null) return '';
-    final start =
-        shift['preferred_start']?.toString().substring(0, 5) ?? '';
-    if (shift['is_last'] == true) return '$start\n~L';
-    final end = shift['preferred_end']?.toString().substring(0, 5) ?? '';
-    if (start.isEmpty) return '○';
-    return '$start\n~$end';
   }
 
+  // ─── セル背景色 ──────────────────────────────────────────────
   Color _getCellColor(String userId, String dateStr) {
-    if (_isConfirmed(userId, dateStr)) return Colors.teal[500]!;
+    final hasConfirmed = _isConfirmed(userId, dateStr);
     final key = '${userId}_$dateStr';
-    if (_dayOffRequests.containsKey(key)) return Colors.red[50]!;
-    if (_shiftRequests.containsKey(key)) return Colors.teal[50]!;
-    return Colors.white;
+    final hasDayOff = _dayOffRequests.containsKey(key);
+    final hasShift = _shiftRequests.containsKey(key);
+
+    if (_isOpen) {
+      // 再募集中：希望シフトを優先
+      if (hasDayOff) return Colors.red[50]!;
+      if (hasShift) return Colors.teal[50]!;
+      // 希望がなければ確定シフトの色
+      if (hasConfirmed) return Colors.teal[200]!; // 薄めの確定色
+      return Colors.white;
+    } else {
+      // 締切済み：確定シフトを優先
+      if (hasConfirmed) return Colors.teal[500]!;
+      if (hasDayOff) return Colors.red[50]!;
+      if (hasShift) return Colors.teal[50]!;
+      return Colors.white;
+    }
   }
 
+  // ─── セル文字色 ──────────────────────────────────────────────
   Color _getCellTextColor(String userId, String dateStr) {
-    if (_isConfirmed(userId, dateStr)) return Colors.white;
+    final hasConfirmed = _isConfirmed(userId, dateStr);
     final key = '${userId}_$dateStr';
-    if (_dayOffRequests.containsKey(key)) return Colors.red[400]!;
-    if (_shiftRequests.containsKey(key)) return Colors.teal[700]!;
-    return Colors.grey[400]!;
+    final hasDayOff = _dayOffRequests.containsKey(key);
+    final hasShift = _shiftRequests.containsKey(key);
+
+    if (_isOpen) {
+      if (hasDayOff) return Colors.red[400]!;
+      if (hasShift) return Colors.teal[700]!;
+      if (hasConfirmed) return Colors.teal[600]!;
+      return Colors.grey[400]!;
+    } else {
+      if (hasConfirmed) return Colors.white;
+      if (hasDayOff) return Colors.red[400]!;
+      if (hasShift) return Colors.teal[700]!;
+      return Colors.grey[400]!;
+    }
   }
 
   int _getSubmittedCount(String userId) {
@@ -214,8 +281,8 @@ class _AdminShiftOverviewScreenState
   Future<void> _shareShift() async {
     setState(() => _isSaving = true);
     try {
-      final boundary = _repaintKey.currentContext?.findRenderObject()
-          as RenderRepaintBoundary?;
+      final boundary = _repaintKey.currentContext
+          ?.findRenderObject() as RenderRepaintBoundary?;
       if (boundary == null) return;
 
       final image = await boundary.toImage(pixelRatio: 2.0);
@@ -243,10 +310,7 @@ class _AdminShiftOverviewScreenState
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('エラー: $e'),
-            backgroundColor: Colors.red,
-          ),
+          SnackBar(content: Text('エラー: $e')),
         );
       }
     } finally {
@@ -263,7 +327,8 @@ class _AdminShiftOverviewScreenState
     return Scaffold(
       appBar: AppBar(
         title: Text('${widget.recruitment['title']} - 希望確認'),
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+        backgroundColor:
+            Theme.of(context).colorScheme.inversePrimary,
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -278,7 +343,9 @@ class _AdminShiftOverviewScreenState
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(12),
-                  color: Colors.teal[50],
+                  color: _isOpen
+                      ? Colors.orange[50]
+                      : Colors.teal[50],
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -287,18 +354,42 @@ class _AdminShiftOverviewScreenState
                         style: const TextStyle(fontSize: 13),
                       ),
                       const SizedBox(height: 6),
-                      Text(
-                        'スタッフ数：${_staff.length}名　提出済み：${_submissions.length}名',
-                        style: TextStyle(
-                            fontSize: 13, color: Colors.teal[700]),
+                      Row(
+                        children: [
+                          Text(
+                            'スタッフ数：${_staff.length}名　提出済み：${_submissions.length}名',
+                            style: TextStyle(
+                                fontSize: 13,
+                                color: Colors.teal[700]),
+                          ),
+                          if (_isOpen) ...[
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.orange[100],
+                                borderRadius:
+                                    BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                '再募集中 - 希望シフトを優先表示',
+                                style: TextStyle(
+                                    fontSize: 11,
+                                    color: Colors.orange[800],
+                                    fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                       const SizedBox(height: 6),
                       Wrap(
                         spacing: 8,
                         runSpacing: 4,
                         children: _staff.map((m) {
-                          final profile =
-                              m['user_profiles'] as Map<String, dynamic>;
+                          final profile = m['user_profiles']
+                              as Map<String, dynamic>;
                           final userId = profile['id'] as String;
                           final name = profile['name'] as String;
                           final submitted = _isSubmitted(userId);
@@ -333,15 +424,20 @@ class _AdminShiftOverviewScreenState
                           spacing: 12,
                           runSpacing: 4,
                           children: [
-                            _legend(Colors.teal[500]!, Colors.white, '確定済み'),
-                            _legend(
-                                Colors.teal[50]!, Colors.teal[700]!, '出勤希望'),
-                            _legend(
-                                Colors.red[50]!, Colors.red[400]!, '希望休'),
-                            _legend(
-                                Colors.white, Colors.grey[400]!, '未提出'),
-                            _legend(
-                                Colors.orange[400]!, Colors.white, 'ヘルプ等'),
+                            if (!_isOpen)
+                              _legend(Colors.teal[500]!,
+                                  Colors.white, '確定済み'),
+                            if (_isOpen)
+                              _legend(Colors.teal[200]!,
+                                  Colors.teal[600]!, '確定済み（希望未提出）'),
+                            _legend(Colors.teal[50]!,
+                                Colors.teal[700]!, '出勤希望'),
+                            _legend(Colors.red[50]!,
+                                Colors.red[400]!, '希望休'),
+                            _legend(Colors.white,
+                                Colors.grey[400]!, '未提出'),
+                            _legend(Colors.orange[400]!,
+                                Colors.white, 'ヘルプ等'),
                           ],
                         ),
                       ),
@@ -385,18 +481,22 @@ class _AdminShiftOverviewScreenState
                                   children: [
                                     Row(
                                       children: [
-                                        _headerCell('スタッフ', 70, 68),
+                                        _headerCell(
+                                            'スタッフ', 70, 68),
                                         ...dates.map((date) {
-                                          final weekday = date.weekday;
-                                          final isSunday =
-                                              weekday == DateTime.sunday;
+                                          final weekday =
+                                              date.weekday;
+                                          final isSunday = weekday ==
+                                              DateTime.sunday;
                                           final isSaturday =
-                                              weekday == DateTime.saturday;
+                                              weekday ==
+                                                  DateTime.saturday;
                                           final dateStr = date
                                               .toIso8601String()
                                               .substring(0, 10);
                                           final confirmedCnt =
-                                              _confirmedCount(dateStr);
+                                              _confirmedCount(
+                                                  dateStr);
 
                                           return GestureDetector(
                                             onTap: () {
@@ -406,22 +506,26 @@ class _AdminShiftOverviewScreenState
                                                   builder: (_) =>
                                                       ShiftTimelineScreen(
                                                     date: date,
-                                                    storeId: widget.storeId,
+                                                    storeId:
+                                                        widget.storeId,
                                                     confirmedShifts:
                                                         _confirmedShifts
                                                             .values
                                                             .toList(),
                                                     staff: _staff,
                                                     shiftRequests:
-                                                        _shiftRequests.values
+                                                        _shiftRequests
+                                                            .values
                                                             .toList(),
                                                     dayOffRequests:
-                                                        _dayOffRequests.values
+                                                        _dayOffRequests
+                                                            .values
                                                             .toList(),
                                                     allDates: dates,
                                                   ),
                                                 ),
-                                              ).then((_) => _loadData());
+                                              ).then(
+                                                  (_) => _loadData());
                                             },
                                             child: Container(
                                               width: 62,
@@ -430,73 +534,101 @@ class _AdminShiftOverviewScreenState
                                                 color: isSunday
                                                     ? Colors.red[50]
                                                     : isSaturday
-                                                        ? Colors.blue[50]
-                                                        : Colors.grey[100],
+                                                        ? Colors
+                                                            .blue[50]
+                                                        : Colors
+                                                            .grey[100],
                                                 border: Border.all(
-                                                    color: Colors.grey[300]!,
+                                                    color: Colors
+                                                        .grey[300]!,
                                                     width: 0.5),
                                               ),
-                                              alignment: Alignment.center,
+                                              alignment:
+                                                  Alignment.center,
                                               child: Column(
                                                 mainAxisAlignment:
-                                                    MainAxisAlignment.center,
+                                                    MainAxisAlignment
+                                                        .center,
                                                 children: [
                                                   Text(
                                                     fmt.format(date),
                                                     style: TextStyle(
                                                       fontSize: 10,
                                                       fontWeight:
-                                                          FontWeight.bold,
+                                                          FontWeight
+                                                              .bold,
                                                       color: isSunday
                                                           ? Colors.red
                                                           : isSaturday
-                                                              ? Colors.blue
-                                                              : Colors.black87,
+                                                              ? Colors
+                                                                  .blue
+                                                              : Colors
+                                                                  .black87,
                                                     ),
                                                   ),
                                                   Text(
-                                                    fmtDay.format(date),
+                                                    fmtDay
+                                                        .format(date),
                                                     style: TextStyle(
                                                       fontSize: 9,
                                                       color: isSunday
                                                           ? Colors.red
                                                           : isSaturday
-                                                              ? Colors.blue
-                                                              : Colors.grey[600],
+                                                              ? Colors
+                                                                  .blue
+                                                              : Colors
+                                                                  .grey[600],
                                                     ),
                                                   ),
-                                                  const SizedBox(height: 4),
+                                                  const SizedBox(
+                                                      height: 4),
                                                   Container(
                                                     padding:
-                                                        const EdgeInsets.symmetric(
-                                                            horizontal: 4,
-                                                            vertical: 2),
-                                                    decoration: BoxDecoration(
-                                                      color: confirmedCnt > 0
-                                                          ? Colors.teal[600]
-                                                          : Colors.grey[500],
+                                                        const EdgeInsets
+                                                            .symmetric(
+                                                            horizontal:
+                                                                4,
+                                                            vertical:
+                                                                2),
+                                                    decoration:
+                                                        BoxDecoration(
+                                                      color: confirmedCnt >
+                                                              0
+                                                          ? Colors
+                                                              .teal[600]
+                                                          : Colors
+                                                              .grey[500],
                                                       borderRadius:
-                                                          BorderRadius.circular(
-                                                              4),
+                                                          BorderRadius
+                                                              .circular(
+                                                                  4),
                                                     ),
                                                     child: Row(
                                                       mainAxisSize:
-                                                          MainAxisSize.min,
+                                                          MainAxisSize
+                                                              .min,
                                                       children: [
-                                                        const Icon(Icons.people,
+                                                        const Icon(
+                                                            Icons
+                                                                .people,
                                                             size: 8,
-                                                            color: Colors.white),
-                                                        const SizedBox(width: 2),
+                                                            color: Colors
+                                                                .white),
+                                                        const SizedBox(
+                                                            width: 2),
                                                         Text(
-                                                          confirmedCnt > 0
+                                                          confirmedCnt >
+                                                                  0
                                                               ? '$confirmedCnt人確定'
                                                               : '人員確認',
                                                           style:
                                                               const TextStyle(
                                                             fontSize: 7,
-                                                            color: Colors.white,
+                                                            color: Colors
+                                                                .white,
                                                             fontWeight:
-                                                                FontWeight.bold,
+                                                                FontWeight
+                                                                    .bold,
                                                           ),
                                                         ),
                                                       ],
@@ -510,10 +642,13 @@ class _AdminShiftOverviewScreenState
                                       ],
                                     ),
                                     ..._staff.map((m) {
-                                      final profile = m['user_profiles']
-                                          as Map<String, dynamic>;
-                                      final userId = profile['id'] as String;
-                                      final name = profile['name'] as String;
+                                      final profile =
+                                          m['user_profiles']
+                                              as Map<String, dynamic>;
+                                      final userId =
+                                          profile['id'] as String;
+                                      final name =
+                                          profile['name'] as String;
 
                                       return Row(
                                         children: [
@@ -523,20 +658,25 @@ class _AdminShiftOverviewScreenState
                                             decoration: BoxDecoration(
                                               color: Colors.teal[50],
                                               border: Border.all(
-                                                  color: Colors.grey[300]!,
+                                                  color:
+                                                      Colors.grey[300]!,
                                                   width: 0.5),
                                             ),
                                             alignment: Alignment.center,
-                                            padding: const EdgeInsets.all(4),
+                                            padding:
+                                                const EdgeInsets.all(4),
                                             child: Text(
                                               name,
                                               style: TextStyle(
                                                 fontSize: 11,
-                                                fontWeight: FontWeight.w500,
+                                                fontWeight:
+                                                    FontWeight.w500,
                                                 color: Colors.teal[800],
                                               ),
-                                              textAlign: TextAlign.center,
-                                              overflow: TextOverflow.ellipsis,
+                                              textAlign:
+                                                  TextAlign.center,
+                                              overflow:
+                                                  TextOverflow.ellipsis,
                                             ),
                                           ),
                                           ...dates.map((date) {
@@ -550,19 +690,23 @@ class _AdminShiftOverviewScreenState
                                                 color: _getCellColor(
                                                     userId, dateStr),
                                                 border: Border.all(
-                                                    color: Colors.grey[200]!,
+                                                    color: Colors
+                                                        .grey[200]!,
                                                     width: 0.5),
                                               ),
                                               alignment: Alignment.center,
                                               child: Text(
-                                                _getCellText(userId, dateStr),
+                                                _getCellText(
+                                                    userId, dateStr),
                                                 style: TextStyle(
                                                   fontSize: 8,
                                                   color: _getCellTextColor(
                                                       userId, dateStr),
-                                                  fontWeight: FontWeight.w500,
+                                                  fontWeight:
+                                                      FontWeight.w500,
                                                 ),
-                                                textAlign: TextAlign.center,
+                                                textAlign:
+                                                    TextAlign.center,
                                               ),
                                             );
                                           }),
@@ -585,22 +729,28 @@ class _AdminShiftOverviewScreenState
                                             decoration: BoxDecoration(
                                               color: Colors.orange[50],
                                               border: Border.all(
-                                                  color: Colors.grey[300]!,
+                                                  color:
+                                                      Colors.grey[300]!,
                                                   width: 0.5),
                                             ),
                                             alignment: Alignment.center,
-                                            padding: const EdgeInsets.all(4),
+                                            padding:
+                                                const EdgeInsets.all(4),
                                             child: Text(
                                               label,
                                               style: TextStyle(
                                                 fontSize: 10,
                                                 color: isTimee
                                                     ? Colors.orange[700]
-                                                    : Colors.deepOrange[700],
-                                                fontWeight: FontWeight.w500,
+                                                    : Colors
+                                                        .deepOrange[700],
+                                                fontWeight:
+                                                    FontWeight.w500,
                                               ),
-                                              textAlign: TextAlign.center,
-                                              overflow: TextOverflow.ellipsis,
+                                              textAlign:
+                                                  TextAlign.center,
+                                              overflow:
+                                                  TextOverflow.ellipsis,
                                             ),
                                           ),
                                           ...dates.map((date) {
@@ -608,10 +758,12 @@ class _AdminShiftOverviewScreenState
                                                 .toIso8601String()
                                                 .substring(0, 10);
                                             final temps =
-                                                _tempShifts[dateStr] ?? [];
+                                                _tempShifts[dateStr] ??
+                                                    [];
                                             final temp = temps.firstWhere(
                                               (t) =>
-                                                  (t['temp_label'] ?? '') ==
+                                                  (t['temp_label'] ??
+                                                      '') ==
                                                   label,
                                               orElse: () => {},
                                             );
@@ -623,13 +775,15 @@ class _AdminShiftOverviewScreenState
                                                 decoration: BoxDecoration(
                                                   color: Colors.white,
                                                   border: Border.all(
-                                                      color: Colors.grey[200]!,
+                                                      color: Colors
+                                                          .grey[200]!,
                                                       width: 0.5),
                                                 ),
                                               );
                                             }
 
-                                            final start = temp['start_time']
+                                            final start = temp[
+                                                        'start_time']
                                                     ?.toString()
                                                     .substring(0, 5) ??
                                                 '';
@@ -639,7 +793,8 @@ class _AdminShiftOverviewScreenState
                                                 ? 'L'
                                                 : temp['end_time']
                                                         ?.toString()
-                                                        .substring(0, 5) ??
+                                                        .substring(
+                                                            0, 5) ??
                                                     '';
 
                                             return Container(
@@ -648,30 +803,36 @@ class _AdminShiftOverviewScreenState
                                               decoration: BoxDecoration(
                                                 color: Colors.orange[50],
                                                 border: Border.all(
-                                                    color: Colors.grey[200]!,
+                                                    color: Colors
+                                                        .grey[200]!,
                                                     width: 0.5),
                                               ),
                                               alignment: Alignment.center,
                                               child: Container(
                                                 margin:
-                                                    const EdgeInsets.all(2),
-                                                padding:
-                                                    const EdgeInsets.symmetric(
-                                                        horizontal: 2,
-                                                        vertical: 1),
+                                                    const EdgeInsets.all(
+                                                        2),
+                                                padding: const EdgeInsets
+                                                    .symmetric(
+                                                    horizontal: 2,
+                                                    vertical: 1),
                                                 decoration: BoxDecoration(
-                                                  color: Colors.orange[400],
+                                                  color:
+                                                      Colors.orange[400],
                                                   borderRadius:
-                                                      BorderRadius.circular(3),
+                                                      BorderRadius
+                                                          .circular(3),
                                                 ),
                                                 child: Text(
                                                   '$start\n~$end',
                                                   style: const TextStyle(
                                                     fontSize: 7,
                                                     color: Colors.white,
-                                                    fontWeight: FontWeight.bold,
+                                                    fontWeight:
+                                                        FontWeight.bold,
                                                   ),
-                                                  textAlign: TextAlign.center,
+                                                  textAlign:
+                                                      TextAlign.center,
                                                 ),
                                               ),
                                             );
@@ -697,12 +858,14 @@ class _AdminShiftOverviewScreenState
       height: height,
       decoration: BoxDecoration(
         color: Colors.grey[100],
-        border: Border.all(color: Colors.grey[300]!, width: 0.5),
+        border:
+            Border.all(color: Colors.grey[300]!, width: 0.5),
       ),
       alignment: Alignment.center,
       child: Text(
         text,
-        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+        style: const TextStyle(
+            fontSize: 11, fontWeight: FontWeight.bold),
       ),
     );
   }
@@ -722,7 +885,8 @@ class _AdminShiftOverviewScreenState
         ),
         const SizedBox(width: 4),
         Text(label,
-            style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+            style: TextStyle(
+                fontSize: 11, color: Colors.grey[600])),
       ],
     );
   }

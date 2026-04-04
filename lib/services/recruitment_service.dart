@@ -40,11 +40,19 @@ class RecruitmentService {
     return List<Map<String, dynamic>>.from(result);
   }
 
-  // 募集をクローズ
+  // 募集を締め切る
   Future<void> closeRecruitment(String recruitmentId) async {
     await _supabase
         .from('shift_recruitments')
         .update({'status': 'closed'})
+        .eq('id', recruitmentId);
+  }
+
+  // 募集を再開（締切 → 募集中に戻す）
+  Future<void> reopenRecruitment(String recruitmentId) async {
+    await _supabase
+        .from('shift_recruitments')
+        .update({'status': 'open'})
         .eq('id', recruitmentId);
   }
 

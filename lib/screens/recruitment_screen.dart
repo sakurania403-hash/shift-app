@@ -60,7 +60,6 @@ class _RecruitmentScreenState extends State<RecruitmentScreen> {
   }
 
   Future<void> _showCreateDialog() async {
-    // 祝日データを先に取得
     final holidays = await StoreSettingsService.getJapaneseHolidays();
 
     final titleController = TextEditingController();
@@ -72,7 +71,6 @@ class _RecruitmentScreenState extends State<RecruitmentScreen> {
 
     if (!mounted) return;
 
-    // Step1：基本情報
     final step1Ok = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
@@ -223,7 +221,6 @@ class _RecruitmentScreenState extends State<RecruitmentScreen> {
 
     if (step1Ok != true) return;
 
-    // Step2：休業日・繁忙期設定
     final Set<DateTime> selectedHolidays = {};
     final List<Map<String, dynamic>> specialPeriods = [];
 
@@ -272,6 +269,61 @@ class _RecruitmentScreenState extends State<RecruitmentScreen> {
     }
 
     await _loadRecruitments();
+  }
+
+  // 再募集確認ダイアログ
+  Future<void> _showReopenDialog(Map<String, dynamic> r) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('再募集する'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('「${r['title']}」を再募集状態に戻します。'),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.teal[50],
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Text(
+                'スタッフは再度希望シフトを編集・提出できるようになります。\n確定済みのシフトはそのまま残ります。',
+                style: TextStyle(fontSize: 12, color: Colors.teal),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('キャンセル'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.teal,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('再募集する'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+    await _recruitmentService.reopenRecruitment(r['id']);
+    await _loadRecruitments();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('再募集に戻しました'),
+          backgroundColor: Colors.teal,
+        ),
+      );
+    }
   }
 
   @override
@@ -437,31 +489,52 @@ class _RecruitmentScreenState extends State<RecruitmentScreen> {
                                       style: ElevatedButton.styleFrom(
                                         backgroundColor: Colors.teal,
                                         foregroundColor: Colors.white,
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 12, vertical: 8),
+                                        padding:
+                                            const EdgeInsets.symmetric(
+                                                horizontal: 12,
+                                                vertical: 8),
                                       ),
                                       icon: const Icon(Icons.people,
                                           size: 14),
                                       label: const Text('希望確認・シフト確定',
-                                          style: TextStyle(fontSize: 12)),
+                                          style:
+                                              TextStyle(fontSize: 12)),
                                     ),
                                     Row(
                                       children: [
+                                        // 募集中 → 締め切るボタン
                                         if (isOpen)
                                           TextButton(
                                             onPressed: () async {
                                               await _recruitmentService
-                                                  .closeRecruitment(r['id']);
+                                                  .closeRecruitment(
+                                                      r['id']);
                                               await _loadRecruitments();
                                             },
                                             child: const Text('締め切る',
                                                 style: TextStyle(
-                                                    color: Colors.orange)),
+                                                    color:
+                                                        Colors.orange)),
+                                          ),
+                                        // 締切済み → 再募集ボタン
+                                        if (!isOpen)
+                                          TextButton.icon(
+                                            onPressed: () =>
+                                                _showReopenDialog(r),
+                                            icon: const Icon(
+                                                Icons.refresh,
+                                                size: 14,
+                                                color: Colors.teal),
+                                            label: const Text('再募集',
+                                                style: TextStyle(
+                                                    color:
+                                                        Colors.teal)),
                                           ),
                                         TextButton(
                                           onPressed: () async {
                                             await _recruitmentService
-                                                .deleteRecruitment(r['id']);
+                                                .deleteRecruitment(
+                                                    r['id']);
                                             await _loadRecruitments();
                                           },
                                           child: const Text('削除',
@@ -485,14 +558,16 @@ class _RecruitmentScreenState extends State<RecruitmentScreen> {
                                                 builder: (_) =>
                                                     ShiftRequestScreen(
                                                   recruitment: r,
-                                                  storeId: _selectedStoreId!,
+                                                  storeId:
+                                                      _selectedStoreId!,
                                                   storeName:
                                                       _selectedStoreName!,
                                                 ),
                                               ),
                                             );
                                           },
-                                          style: OutlinedButton.styleFrom(
+                                          style:
+                                              OutlinedButton.styleFrom(
                                             foregroundColor: Colors.teal,
                                             side: const BorderSide(
                                                 color: Colors.teal),
@@ -504,8 +579,8 @@ class _RecruitmentScreenState extends State<RecruitmentScreen> {
                                               Icons.edit_calendar,
                                               size: 14),
                                           label: const Text('希望を入力',
-                                              style:
-                                                  TextStyle(fontSize: 12)),
+                                              style: TextStyle(
+                                                  fontSize: 12)),
                                         ),
                                       ),
                                     if (isOpen) const SizedBox(width: 8),
@@ -518,7 +593,8 @@ class _RecruitmentScreenState extends State<RecruitmentScreen> {
                                               builder: (_) =>
                                                   StaffConfirmedShiftScreen(
                                                 recruitment: r,
-                                                storeId: _selectedStoreId!,
+                                                storeId:
+                                                    _selectedStoreId!,
                                                 storeName:
                                                     _selectedStoreName!,
                                               ),
@@ -536,8 +612,8 @@ class _RecruitmentScreenState extends State<RecruitmentScreen> {
                                             Icons.calendar_month,
                                             size: 14),
                                         label: const Text('確定シフトを見る',
-                                            style:
-                                                TextStyle(fontSize: 12)),
+                                            style: TextStyle(
+                                                fontSize: 12)),
                                       ),
                                     ),
                                   ],
@@ -582,7 +658,8 @@ class _CustomDatePickerDialog extends StatefulWidget {
       _CustomDatePickerDialogState();
 }
 
-class _CustomDatePickerDialogState extends State<_CustomDatePickerDialog> {
+class _CustomDatePickerDialogState
+    extends State<_CustomDatePickerDialog> {
   late DateTime _displayMonth;
   DateTime? _selectedDate;
 
@@ -590,8 +667,8 @@ class _CustomDatePickerDialogState extends State<_CustomDatePickerDialog> {
   void initState() {
     super.initState();
     _selectedDate = widget.initialDate;
-    _displayMonth =
-        DateTime(widget.initialDate.year, widget.initialDate.month, 1);
+    _displayMonth = DateTime(
+        widget.initialDate.year, widget.initialDate.month, 1);
   }
 
   bool _isJapaneseHoliday(DateTime date) {
@@ -617,7 +694,7 @@ class _CustomDatePickerDialogState extends State<_CustomDatePickerDialog> {
     final month = _displayMonth.month;
     final firstDay = DateTime(year, month, 1);
     final lastDay = DateTime(year, month + 1, 0);
-    final startWeekday = firstDay.weekday % 7; // 日曜=0
+    final startWeekday = firstDay.weekday % 7;
     final totalCells = startWeekday + lastDay.day;
     final totalRows = (totalCells / 7).ceil();
     final fmt = DateFormat('yyyy/MM/dd');
@@ -630,7 +707,6 @@ class _CustomDatePickerDialogState extends State<_CustomDatePickerDialog> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // タイトル・月ナビ
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 8, 0),
               child: Row(
@@ -641,38 +717,41 @@ class _CustomDatePickerDialogState extends State<_CustomDatePickerDialog> {
                   const Spacer(),
                   IconButton(
                     icon: const Icon(Icons.chevron_left),
-                    onPressed: () => setState(() => _displayMonth = DateTime(
-                        _displayMonth.year, _displayMonth.month - 1, 1)),
+                    onPressed: () => setState(() => _displayMonth =
+                        DateTime(_displayMonth.year,
+                            _displayMonth.month - 1, 1)),
                   ),
-                  Text(DateFormat('yyyy年M月').format(_displayMonth),
-                      style: const TextStyle(fontWeight: FontWeight.bold)),
+                  Text(
+                      DateFormat('yyyy年M月').format(_displayMonth),
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold)),
                   IconButton(
                     icon: const Icon(Icons.chevron_right),
-                    onPressed: () => setState(() => _displayMonth = DateTime(
-                        _displayMonth.year, _displayMonth.month + 1, 1)),
+                    onPressed: () => setState(() => _displayMonth =
+                        DateTime(_displayMonth.year,
+                            _displayMonth.month + 1, 1)),
                   ),
                 ],
               ),
             ),
-            // 選択中日付
             if (_selectedDate != null)
               Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 16, vertical: 2),
                 child: Align(
                   alignment: Alignment.centerLeft,
                   child: Text(
                     fmt.format(_selectedDate!),
-                    style: TextStyle(fontSize: 13, color: Colors.teal[700]),
+                    style:
+                        TextStyle(fontSize: 13, color: Colors.teal[700]),
                   ),
                 ),
               ),
-            // 曜日ヘッダー
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 8),
               child: Row(
-                children:
-                    ['日', '月', '火', '水', '木', '金', '土'].map((w) {
+                children: ['日', '月', '火', '水', '木', '金', '土']
+                    .map((w) {
                   final color = w == '日'
                       ? Colors.red
                       : w == '土'
@@ -680,7 +759,8 @@ class _CustomDatePickerDialogState extends State<_CustomDatePickerDialog> {
                           : Colors.black54;
                   return Expanded(
                     child: Container(
-                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      padding:
+                          const EdgeInsets.symmetric(vertical: 6),
                       alignment: Alignment.center,
                       child: Text(w,
                           style: TextStyle(
@@ -692,21 +772,23 @@ class _CustomDatePickerDialogState extends State<_CustomDatePickerDialog> {
                 }).toList(),
               ),
             ),
-            // カレンダーグリッド
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 8),
               child: Column(
                 children: List.generate(totalRows, (row) {
                   return Row(
                     children: List.generate(7, (col) {
-                      final dayNum = row * 7 + col - startWeekday + 1;
+                      final dayNum =
+                          row * 7 + col - startWeekday + 1;
                       if (dayNum < 1 || dayNum > lastDay.day) {
-                        return const Expanded(child: SizedBox(height: 40));
+                        return const Expanded(
+                            child: SizedBox(height: 40));
                       }
                       final date = DateTime(year, month, dayNum);
                       final isSelected = _selectedDate != null &&
                           _isSameDay(date, _selectedDate!);
-                      final isToday = _isSameDay(date, DateTime.now());
+                      final isToday =
+                          _isSameDay(date, DateTime.now());
                       final isHoliday = _isJapaneseHoliday(date);
 
                       return Expanded(
@@ -722,15 +804,18 @@ class _CustomDatePickerDialogState extends State<_CustomDatePickerDialog> {
                                   : isToday
                                       ? Colors.teal[50]
                                       : Colors.transparent,
-                              borderRadius: BorderRadius.circular(20),
+                              borderRadius:
+                                  BorderRadius.circular(20),
                               border: isToday && !isSelected
                                   ? Border.all(
-                                      color: Colors.teal, width: 1)
+                                      color: Colors.teal,
+                                      width: 1)
                                   : null,
                             ),
                             alignment: Alignment.center,
                             child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
+                              mainAxisAlignment:
+                                  MainAxisAlignment.center,
                               children: [
                                 Text(
                                   '$dayNum',
@@ -739,8 +824,8 @@ class _CustomDatePickerDialogState extends State<_CustomDatePickerDialog> {
                                     fontWeight: isSelected || isToday
                                         ? FontWeight.bold
                                         : FontWeight.normal,
-                                    color:
-                                        _dayColor(date, selected: isSelected),
+                                    color: _dayColor(date,
+                                        selected: isSelected),
                                   ),
                                 ),
                                 if (isHoliday && !isSelected)
@@ -760,7 +845,6 @@ class _CustomDatePickerDialogState extends State<_CustomDatePickerDialog> {
                 }),
               ),
             ),
-            // ボタン
             Padding(
               padding: const EdgeInsets.all(12),
               child: Row(
@@ -774,7 +858,8 @@ class _CustomDatePickerDialogState extends State<_CustomDatePickerDialog> {
                   ElevatedButton(
                     onPressed: _selectedDate == null
                         ? null
-                        : () => Navigator.pop(context, _selectedDate),
+                        : () =>
+                            Navigator.pop(context, _selectedDate),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.teal,
                       foregroundColor: Colors.white,
@@ -912,8 +997,9 @@ class _Step2DialogState extends State<_Step2Dialog>
                           );
                           if (d != null) setInner(() => start = d);
                         },
-                        child: Text(
-                            start != null ? fmt.format(start!) : '開始日'),
+                        child: Text(start != null
+                            ? fmt.format(start!)
+                            : '開始日'),
                       ),
                     ),
                     const Padding(
@@ -932,8 +1018,9 @@ class _Step2DialogState extends State<_Step2Dialog>
                           );
                           if (d != null) setInner(() => end = d);
                         },
-                        child: Text(
-                            end != null ? fmt.format(end!) : '終了日'),
+                        child: Text(end != null
+                            ? fmt.format(end!)
+                            : '終了日'),
                       ),
                     ),
                   ],
@@ -963,7 +1050,8 @@ class _Step2DialogState extends State<_Step2Dialog>
                     start == null ||
                     end == null) {
                   ScaffoldMessenger.of(ctx).showSnackBar(
-                    const SnackBar(content: Text('すべての項目を入力してください')),
+                    const SnackBar(
+                        content: Text('すべての項目を入力してください')),
                   );
                   return;
                 }
@@ -973,7 +1061,8 @@ class _Step2DialogState extends State<_Step2Dialog>
                     'start_date': start!,
                     'end_date': end!,
                     'min_staff_override':
-                        int.tryParse(minStaffController.text.trim()) ?? 3,
+                        int.tryParse(minStaffController.text.trim()) ??
+                            3,
                   });
                 });
                 Navigator.pop(ctx);
@@ -1025,15 +1114,17 @@ class _Step2DialogState extends State<_Step2Dialog>
             runSpacing: 6,
             children: entry.value.map((d) {
               final selected = _isHolidaySelected(d);
-              final weekday =
-                  ['月', '火', '水', '木', '金', '土', '日'][d.weekday - 1];
+              final weekday = ['月', '火', '水', '木', '金', '土', '日']
+                  [d.weekday - 1];
               final isJpHoliday = _isJapaneseHoliday(d);
-              final textColor = _dayTextColor(d, selected: selected);
+              final textColor =
+                  _dayTextColor(d, selected: selected);
 
               Color bgColor;
               if (selected) {
                 bgColor = Colors.red[400]!;
-              } else if (d.weekday == DateTime.sunday || isJpHoliday) {
+              } else if (d.weekday == DateTime.sunday ||
+                  isJpHoliday) {
                 bgColor = Colors.red[50]!;
               } else if (d.weekday == DateTime.saturday) {
                 bgColor = Colors.blue[50]!;
@@ -1050,7 +1141,9 @@ class _Step2DialogState extends State<_Step2Dialog>
                     color: bgColor,
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
-                        color: selected ? Colors.red : Colors.grey[300]!),
+                        color: selected
+                            ? Colors.red
+                            : Colors.grey[300]!),
                   ),
                   child: Column(
                     children: [
@@ -1063,12 +1156,13 @@ class _Step2DialogState extends State<_Step2Dialog>
                         ),
                       ),
                       Text(weekday,
-                          style:
-                              TextStyle(fontSize: 10, color: textColor)),
+                          style: TextStyle(
+                              fontSize: 10, color: textColor)),
                       if (isJpHoliday && !selected)
                         Text('祝',
                             style: TextStyle(
-                                fontSize: 8, color: Colors.red[300])),
+                                fontSize: 8,
+                                color: Colors.red[300])),
                     ],
                   ),
                 ),
@@ -1080,7 +1174,8 @@ class _Step2DialogState extends State<_Step2Dialog>
         if (widget.selectedHolidays.isNotEmpty) ...[
           const Divider(),
           Text('選択中：${widget.selectedHolidays.length}日',
-              style: const TextStyle(color: Colors.red, fontSize: 13)),
+              style:
+                  const TextStyle(color: Colors.red, fontSize: 13)),
         ],
       ],
     );
@@ -1135,7 +1230,8 @@ class _Step2DialogState extends State<_Step2Dialog>
                       size: 20, color: Colors.orange[700]),
                 ),
                 title: Text(p['label'] as String,
-                    style: const TextStyle(fontWeight: FontWeight.bold)),
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold)),
                 subtitle: Text(
                   '${fmt.format(p['start_date'] as DateTime)} 〜 ${fmt.format(p['end_date'] as DateTime)}'
                   '\n必要人数：${p['min_staff_override']}名',
@@ -1144,8 +1240,8 @@ class _Step2DialogState extends State<_Step2Dialog>
                 trailing: IconButton(
                   icon: const Icon(Icons.delete,
                       size: 18, color: Colors.red),
-                  onPressed: () =>
-                      setState(() => widget.specialPeriods.removeAt(i)),
+                  onPressed: () => setState(
+                      () => widget.specialPeriods.removeAt(i)),
                 ),
               ),
             );
@@ -1190,8 +1286,8 @@ class _Step2DialogState extends State<_Step2Dialog>
                   ),
                   Text(
                     '${DateFormat('M/d').format(widget.workStart)} 〜 ${DateFormat('M/d').format(widget.workEnd)}',
-                    style:
-                        TextStyle(fontSize: 12, color: Colors.grey[600]),
+                    style: TextStyle(
+                        fontSize: 12, color: Colors.grey[600]),
                   ),
                 ],
               ),
@@ -1217,10 +1313,13 @@ class _Step2DialogState extends State<_Step2Dialog>
                               horizontal: 5, vertical: 1),
                           decoration: BoxDecoration(
                               color: Colors.red,
-                              borderRadius: BorderRadius.circular(10)),
-                          child: Text('${widget.selectedHolidays.length}',
+                              borderRadius:
+                                  BorderRadius.circular(10)),
+                          child: Text(
+                              '${widget.selectedHolidays.length}',
                               style: const TextStyle(
-                                  color: Colors.white, fontSize: 10)),
+                                  color: Colors.white,
+                                  fontSize: 10)),
                         ),
                       ],
                     ],
@@ -1240,10 +1339,13 @@ class _Step2DialogState extends State<_Step2Dialog>
                               horizontal: 5, vertical: 1),
                           decoration: BoxDecoration(
                               color: Colors.orange,
-                              borderRadius: BorderRadius.circular(10)),
-                          child: Text('${widget.specialPeriods.length}',
+                              borderRadius:
+                                  BorderRadius.circular(10)),
+                          child: Text(
+                              '${widget.specialPeriods.length}',
                               style: const TextStyle(
-                                  color: Colors.white, fontSize: 10)),
+                                  color: Colors.white,
+                                  fontSize: 10)),
                         ),
                       ],
                     ],

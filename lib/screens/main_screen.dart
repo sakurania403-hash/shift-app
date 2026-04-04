@@ -7,6 +7,7 @@ import 'recruitment_screen.dart';
 import 'invite_screen.dart';
 import 'store_settings_screen.dart';
 import 'member_management_screen.dart';
+import 'staff_payroll_screen.dart';
 
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
@@ -70,6 +71,7 @@ class _MainScreenState extends State<MainScreen> {
       return const StoreSetupScreen();
     }
 
+    // ─── 管理者ナビ ───────────────────────────────────────────
     final adminDestinations = const [
       NavigationDestination(
         icon: Icon(Icons.home_outlined),
@@ -98,6 +100,7 @@ class _MainScreenState extends State<MainScreen> {
       ),
     ];
 
+    // ─── スタッフナビ（給料計算を追加）──────────────────────────
     final staffDestinations = const [
       NavigationDestination(
         icon: Icon(Icons.home_outlined),
@@ -110,14 +113,19 @@ class _MainScreenState extends State<MainScreen> {
         label: 'シフト',
       ),
       NavigationDestination(
+        icon: Icon(Icons.calculate_outlined),
+        selectedIcon: Icon(Icons.calculate),
+        label: '給料計算',
+      ),
+      NavigationDestination(
         icon: Icon(Icons.settings_outlined),
         selectedIcon: Icon(Icons.settings),
         label: '設定',
       ),
     ];
 
+    // ─── 管理者画面リスト ──────────────────────────────────────
     final adminScreens = [
-      // ホーム
       Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -147,7 +155,13 @@ class _MainScreenState extends State<MainScreen> {
       const StoreSettingsScreen(),
     ];
 
+    // ─── スタッフ画面リスト ────────────────────────────────────
+    final staffStoreId = _stores.isNotEmpty
+        ? (_toMap(_stores.first['stores'])['id'] as String? ?? '')
+        : '';
+
     final staffScreens = [
+      // ホーム
       Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -170,13 +184,21 @@ class _MainScreenState extends State<MainScreen> {
           ],
         ),
       ),
+      // シフト
       const RecruitmentScreen(),
+      // 給料計算
+      staffStoreId.isNotEmpty
+          ? StaffPayrollScreen(storeId: staffStoreId)
+          : const Center(child: Text('店舗情報が取得できませんでした')),
+      // 設定
       const Center(child: Text('設定（実装予定）')),
     ];
 
-    final destinations = _isAdmin ? adminDestinations : staffDestinations;
+    final destinations =
+        _isAdmin ? adminDestinations : staffDestinations;
     final screens = _isAdmin ? adminScreens : staffScreens;
-    final currentIndex = _selectedIndex >= screens.length ? 0 : _selectedIndex;
+    final currentIndex =
+        _selectedIndex >= screens.length ? 0 : _selectedIndex;
 
     return Scaffold(
       appBar: AppBar(
@@ -195,7 +217,8 @@ class _MainScreenState extends State<MainScreen> {
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: currentIndex,
-        onDestinationSelected: (i) => setState(() => _selectedIndex = i),
+        onDestinationSelected: (i) =>
+            setState(() => _selectedIndex = i),
         destinations: destinations,
       ),
     );

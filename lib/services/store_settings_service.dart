@@ -15,8 +15,10 @@ class StoreSettingsService {
         Uri.parse('https://holidays-jp.github.io/api/v1/date.json'),
       );
       if (response.statusCode == 200) {
-        final data = json.decode(response.body) as Map<String, dynamic>;
-        _holidayCache = data.map((k, v) => MapEntry(k, v.toString()));
+        final data =
+            json.decode(response.body) as Map<String, dynamic>;
+        _holidayCache =
+            data.map((k, v) => MapEntry(k, v.toString()));
         return _holidayCache!;
       }
     } catch (e) {
@@ -29,7 +31,8 @@ class StoreSettingsService {
   static Future<bool> isHoliday(
       DateTime date, Map<String, String> holidays) async {
     final weekday = date.weekday;
-    if (weekday == DateTime.saturday || weekday == DateTime.sunday) {
+    if (weekday == DateTime.saturday ||
+        weekday == DateTime.sunday) {
       return true;
     }
     final dateStr = date.toIso8601String().substring(0, 10);
@@ -37,7 +40,8 @@ class StoreSettingsService {
   }
 
   // 勤務時間帯を取得
-  Future<List<Map<String, dynamic>>> getWorkHours(String storeId) async {
+  Future<List<Map<String, dynamic>>> getWorkHours(
+      String storeId) async {
     final result = await _supabase
         .from('store_work_hours')
         .select()
@@ -99,7 +103,8 @@ class StoreSettingsService {
   }
 
   // 休憩ルールを取得
-  Future<List<Map<String, dynamic>>> getBreakRules(String storeId) async {
+  Future<List<Map<String, dynamic>>> getBreakRules(
+      String storeId) async {
     final result = await _supabase
         .from('store_break_rules')
         .select()

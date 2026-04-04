@@ -276,7 +276,8 @@ class _StoreSettingsScreenState extends State<StoreSettingsScreen>
               await _settingsService.addBreakRule(
                 storeId: _selectedStoreId!,
                 workHoursThreshold:
-                    double.tryParse(thresholdController.text.trim()) ?? 6,
+                    double.tryParse(thresholdController.text.trim()) ??
+                        6,
                 breakMinutes:
                     int.tryParse(breakController.text.trim()) ?? 45,
               );
@@ -302,29 +303,25 @@ class _StoreSettingsScreenState extends State<StoreSettingsScreen>
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: dayType == 'weekday'
-                          ? Colors.blue[50]
-                          : Colors.red[50],
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(
-                      dayType == 'weekday' ? '平日' : '休日（土日・祝日）',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.bold,
-                        color: dayType == 'weekday'
-                            ? Colors.blue[700]
-                            : Colors.red[700],
-                      ),
-                    ),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: dayType == 'weekday'
+                      ? Colors.blue[50]
+                      : Colors.red[50],
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  dayType == 'weekday' ? '平日' : '休日（土日・祝日）',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                    color: dayType == 'weekday'
+                        ? Colors.blue[700]
+                        : Colors.red[700],
                   ),
-                ],
+                ),
               ),
               TextButton.icon(
                 onPressed: () => _showWorkHoursDialog(dayType),
@@ -335,7 +332,6 @@ class _StoreSettingsScreenState extends State<StoreSettingsScreen>
               ),
             ],
           ),
-          // 勤務時間帯表示
           Builder(builder: (context) {
             final wh = _workHours
                 .where((w) => w['day_type'] == dayType)
@@ -374,7 +370,6 @@ class _StoreSettingsScreenState extends State<StoreSettingsScreen>
               ),
             );
           }),
-          // 時間帯別必要人数
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -434,8 +429,8 @@ class _StoreSettingsScreenState extends State<StoreSettingsScreen>
               onPressed: _showBreakRuleDialog,
               icon: const Icon(Icons.add, size: 16),
               label: const Text('追加'),
-              style:
-                  TextButton.styleFrom(foregroundColor: Colors.teal),
+              style: TextButton.styleFrom(
+                  foregroundColor: Colors.teal),
             ),
           ],
         ),
@@ -516,7 +511,8 @@ class _StoreSettingsScreenState extends State<StoreSettingsScreen>
                   isDense: true,
                 ),
                 items: _stores.map((m) {
-                  final store = m['stores'] as Map<String, dynamic>;
+                  final store =
+                      m['stores'] as Map<String, dynamic>;
                   return DropdownMenuItem(
                     value: store['id'] as String,
                     child: Text(store['name']),
@@ -524,8 +520,9 @@ class _StoreSettingsScreenState extends State<StoreSettingsScreen>
                 }).toList(),
                 onChanged: (v) async {
                   final store = (_stores.firstWhere((m) =>
-                      (m['stores'] as Map<String, dynamic>)['id'] ==
-                      v)['stores']) as Map<String, dynamic>;
+                          (m['stores']
+                              as Map<String, dynamic>)['id'] ==
+                          v)['stores']) as Map<String, dynamic>;
                   setState(() {
                     _selectedStoreId = v;
                     _selectedStoreName = store['name'];

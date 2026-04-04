@@ -12,42 +12,67 @@ class ShiftRequestService {
     bool isDayOff = false,
     bool isLast = false,
     String? note,
+    // 既に提出済みかどうか（提出済みの場合はINSERT時からsubmittedにする）
+    bool alreadySubmitted = false,
   }) async {
     final userId = _supabase.auth.currentUser!.id;
+    final dateStr = date.toIso8601String().substring(0, 10);
+
+    // 提出済みなら新規レコードも即submittedにする
+    final shiftStatus = alreadySubmitted ? 'submitted' : 'draft';
+    final dayOffStatus = alreadySubmitted ? 'submitted' : 'draft';
 
     if (isDayOff) {
-      await _supabase.from('day_off_requests').upsert({
-        'user_id': userId,
-        'store_id': storeId,
-        'date': date.toIso8601String().substring(0, 10),
-        'status': 'pending',
-        'status_submit': 'draft',
-      }, onConflict: 'user_id, store_id, date');
-
+      // 既存の shift_request を削除
       await _supabase
           .from('shift_requests')
           .delete()
           .eq('user_id', userId)
           .eq('store_id', storeId)
-          .eq('date', date.toIso8601String().substring(0, 10));
-    } else {
-      await _supabase.from('shift_requests').upsert({
-        'user_id': userId,
-        'store_id': storeId,
-        'date': date.toIso8601String().substring(0, 10),
-        'preferred_start': preferredStart,
-        'preferred_end': preferredEnd,
-        'is_last': isLast,
-        'note': note,
-        'status': 'draft',
-      }, onConflict: 'user_id, store_id, date');
+          .eq('date', dateStr);
 
+      // day_off_requests は DELETE → INSERT
       await _supabase
           .from('day_off_requests')
           .delete()
           .eq('user_id', userId)
           .eq('store_id', storeId)
-          .eq('date', date.toIso8601String().substring(0, 10));
+          .eq('date', dateStr);
+
+      await _supabase.from('day_off_requests').insert({
+        'user_id': userId,
+        'store_id': storeId,
+        'date': dateStr,
+        'status': 'pending',
+        'status_submit': dayOffStatus,
+      });
+    } else {
+      // 既存の day_off_request を削除
+      await _supabase
+          .from('day_off_requests')
+          .delete()
+          .eq('user_id', userId)
+          .eq('store_id', storeId)
+          .eq('date', dateStr);
+
+      // shift_requests は DELETE → INSERT
+      await _supabase
+          .from('shift_requests')
+          .delete()
+          .eq('user_id', userId)
+          .eq('store_id', storeId)
+          .eq('date', dateStr);
+
+      await _supabase.from('shift_requests').insert({
+        'user_id': userId,
+        'store_id': storeId,
+        'date': dateStr,
+        'preferred_start': preferredStart,
+        'preferred_end': preferredEnd,
+        'is_last': isLast,
+        'note': note,
+        'status': shiftStatus,
+      });
     }
   }
 
@@ -132,18 +157,20 @@ class ShiftRequestService {
     required DateTime date,
   }) async {
     final userId = _supabase.auth.currentUser!.id;
+    final dateStr = date.toIso8601String().substring(0, 10);
+
     await _supabase
         .from('shift_requests')
         .delete()
         .eq('user_id', userId)
         .eq('store_id', storeId)
-        .eq('date', date.toIso8601String().substring(0, 10));
+        .eq('date', dateStr);
 
     await _supabase
         .from('day_off_requests')
         .delete()
         .eq('user_id', userId)
         .eq('store_id', storeId)
-        .eq('date', date.toIso8601String().substring(0, 10));
+        .eq('date', dateStr);
   }
 }
