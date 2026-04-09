@@ -220,12 +220,25 @@ class _StaffConfirmedShiftScreenState
                                       final dateStr = date
                                           .toIso8601String()
                                           .substring(0, 10);
-                                      final isHoliday =
-                                          _holidayMap[dateStr] ?? false;
-                                      final isRed = isSunday || isHoliday;
-                                      final isBlue = isSaturday && !isHoliday;
+                                      // 土曜は祝日でも青扱い
+                                      // 日曜と平日祝日のみ赤
+                                      final isJpHoliday = !isSaturday &&
+                                          (_holidayMap[dateStr] ?? false);
+                                      final isRed = isSunday || isJpHoliday;
+                                      final isBlue = isSaturday;
                                       final confirmedCnt =
                                           _confirmedCount(dateStr);
+
+                                      final dateTextColor = isRed
+                                          ? Colors.red
+                                          : isBlue
+                                              ? Colors.blue
+                                              : Colors.black87;
+                                      final dayTextColor = isRed
+                                          ? Colors.red
+                                          : isBlue
+                                              ? Colors.blue
+                                              : Colors.grey[600]!;
 
                                       return Container(
                                         width: 62,
@@ -250,22 +263,14 @@ class _StaffConfirmedShiftScreenState
                                               style: TextStyle(
                                                 fontSize: 10,
                                                 fontWeight: FontWeight.bold,
-                                                color: isRed
-                                                    ? Colors.red
-                                                    : isBlue
-                                                        ? Colors.blue
-                                                        : Colors.black87,
+                                                color: dateTextColor,
                                               ),
                                             ),
                                             Text(
                                               fmtDay.format(date),
                                               style: TextStyle(
                                                 fontSize: 9,
-                                                color: isRed
-                                                    ? Colors.red
-                                                    : isBlue
-                                                        ? Colors.blue
-                                                        : Colors.grey[600],
+                                                color: dayTextColor,
                                               ),
                                             ),
                                             const SizedBox(height: 4),

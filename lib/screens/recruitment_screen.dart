@@ -38,17 +38,35 @@ class _RecruitmentScreenState extends State<RecruitmentScreen> {
   }
 
   Future<void> _loadStores() async {
-    final stores = await _storeService.getMyStores();
+    // ① stores取得 と 祝日キャッシュウォームアップ を並列実行
+    final results = await Future.wait([
+      _storeService.getMyStores(),
+      StoreSettingsService.getJapaneseHolidays(), // 戻り値は使わないがキャッシュに乗せる
+    ]);
+
+    final stores = results[0] as List<Map<String, dynamic>>;
+
+    String? storeId;
+    String? storeName;
+    String? role;
+
+    if (stores.isNotEmpty) {
+      final firstStore = _toMap(stores.first['stores']);
+      storeId = firstStore['id'] as String?;
+      storeName = firstStore['name'] as String?;
+      role = stores.first['role'] as String?;
+    }
+
     setState(() {
       _stores = stores;
-      if (stores.isNotEmpty) {
-        final firstStore = _toMap(stores.first['stores']);
-        _selectedStoreId = firstStore['id'] as String?;
-        _selectedStoreName = firstStore['name'] as String?;
-        _selectedRole = stores.first['role'] as String?;
-      }
+      _selectedStoreId = storeId;
+      _selectedStoreName = storeName;
+      _selectedRole = role;
     });
-    if (_selectedStoreId != null) await _loadRecruitments();
+
+    // ② storeIdが必要なので recruitments はここで取得（依存関係あり）
+    if (storeId != null) await _loadRecruitments();
+
     setState(() => _isLoading = false);
   }
 

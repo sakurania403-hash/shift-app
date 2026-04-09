@@ -307,7 +307,6 @@ class _MemberManagementScreenState extends State<MemberManagementScreen>
               final name = profile['name'] ?? '';
               final email = profile['email'] ?? '';
               final role = member['role'] as String;
-              final wage = member['hourly_wage'] ?? 0;
               final isAdmin = role == 'admin';
 
               return ListTile(
@@ -342,7 +341,7 @@ class _MemberManagementScreenState extends State<MemberManagementScreen>
                       ),
                   ],
                 ),
-                subtitle: Text('$email　時給：¥$wage',
+                subtitle: Text(email,
                     style: const TextStyle(fontSize: 12)),
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,

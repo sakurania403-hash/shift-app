@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
 import '../services/store_service.dart';
+import '../services/store_settings_service.dart';
 import 'login_screen.dart';
 import 'store_setup_screen.dart';
 import 'recruitment_screen.dart';
@@ -8,6 +9,8 @@ import 'invite_screen.dart';
 import 'store_settings_screen.dart';
 import 'member_management_screen.dart';
 import 'staff_payroll_screen.dart';
+import 'staff_settings_screen.dart';
+import 'home_calendar_screen.dart';
 
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
@@ -17,26 +20,27 @@ class MainScreen extends StatefulWidget {
 }
 
 class _MainScreenState extends State<MainScreen> {
-  final _authService = AuthService();
+  final _authService  = AuthService();
   final _storeService = StoreService();
   List<Map<String, dynamic>> _stores = [];
   bool _isLoading = true;
-  bool _isAdmin = false;
-  int _selectedIndex = 0;
+  bool _isAdmin   = false;
+  int  _selectedIndex = 0;
 
   @override
   void initState() {
     super.initState();
+    StoreSettingsService.getJapaneseHolidays();
     _loadStores();
   }
 
   Future<void> _loadStores() async {
     try {
-      final stores = await _storeService.getMyStores();
+      final stores  = await _storeService.getMyStores();
       final isAdmin = stores.any((m) => m['role'] == 'admin');
       setState(() {
-        _stores = stores;
-        _isAdmin = isAdmin;
+        _stores    = stores;
+        _isAdmin   = isAdmin;
         _isLoading = false;
       });
     } catch (e) {
@@ -72,10 +76,10 @@ class _MainScreenState extends State<MainScreen> {
     }
 
     // ─── 管理者ナビ ───────────────────────────────────────────
-    final adminDestinations = const [
+    const adminDestinations = [
       NavigationDestination(
-        icon: Icon(Icons.home_outlined),
-        selectedIcon: Icon(Icons.home),
+        icon: Icon(Icons.calendar_month_outlined),
+        selectedIcon: Icon(Icons.calendar_month),
         label: 'ホーム',
       ),
       NavigationDestination(
@@ -100,11 +104,11 @@ class _MainScreenState extends State<MainScreen> {
       ),
     ];
 
-    // ─── スタッフナビ（給料計算を追加）──────────────────────────
-    final staffDestinations = const [
+    // ─── スタッフナビ ─────────────────────────────────────────
+    const staffDestinations = [
       NavigationDestination(
-        icon: Icon(Icons.home_outlined),
-        selectedIcon: Icon(Icons.home),
+        icon: Icon(Icons.calendar_month_outlined),
+        selectedIcon: Icon(Icons.calendar_month),
         label: 'ホーム',
       ),
       NavigationDestination(
@@ -126,29 +130,7 @@ class _MainScreenState extends State<MainScreen> {
 
     // ─── 管理者画面リスト ──────────────────────────────────────
     final adminScreens = [
-      Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.calendar_month, size: 80, color: Colors.teal),
-            const SizedBox(height: 24),
-            Text(
-              '所属店舗',
-              style: Theme.of(context).textTheme.headlineSmall,
-            ),
-            const SizedBox(height: 16),
-            ..._stores.map((m) {
-              final store = _toMap(m['stores']);
-              final role = m['role'] as String;
-              return ListTile(
-                leading: const Icon(Icons.store, color: Colors.teal),
-                title: Text(store['name'] ?? ''),
-                subtitle: Text(role == 'admin' ? '管理者' : 'スタッフ'),
-              );
-            }),
-          ],
-        ),
-      ),
+      HomeCalendarScreen(stores: _stores, isAdmin: true),
       const RecruitmentScreen(),
       const MemberManagementScreen(),
       const InviteScreen(),
@@ -156,47 +138,15 @@ class _MainScreenState extends State<MainScreen> {
     ];
 
     // ─── スタッフ画面リスト ────────────────────────────────────
-    final staffStoreId = _stores.isNotEmpty
-        ? (_toMap(_stores.first['stores'])['id'] as String? ?? '')
-        : '';
-
     final staffScreens = [
-      // ホーム
-      Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.calendar_month, size: 80, color: Colors.teal),
-            const SizedBox(height: 24),
-            Text(
-              '所属店舗',
-              style: Theme.of(context).textTheme.headlineSmall,
-            ),
-            const SizedBox(height: 16),
-            ..._stores.map((m) {
-              final store = _toMap(m['stores']);
-              return ListTile(
-                leading: const Icon(Icons.store, color: Colors.teal),
-                title: Text(store['name'] ?? ''),
-                subtitle: const Text('スタッフ'),
-              );
-            }),
-          ],
-        ),
-      ),
-      // シフト
+      HomeCalendarScreen(stores: _stores, isAdmin: false),
       const RecruitmentScreen(),
-      // 給料計算
-      staffStoreId.isNotEmpty
-          ? StaffPayrollScreen(storeId: staffStoreId)
-          : const Center(child: Text('店舗情報が取得できませんでした')),
-      // 設定
-      const Center(child: Text('設定（実装予定）')),
+      StaffPayrollScreen(stores: _stores),
+      StaffSettingsScreen(stores: _stores),
     ];
 
-    final destinations =
-        _isAdmin ? adminDestinations : staffDestinations;
-    final screens = _isAdmin ? adminScreens : staffScreens;
+    final destinations = _isAdmin ? adminDestinations : staffDestinations;
+    final screens      = _isAdmin ? adminScreens      : staffScreens;
     final currentIndex =
         _selectedIndex >= screens.length ? 0 : _selectedIndex;
 

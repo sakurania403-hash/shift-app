@@ -1,0 +1,918 @@
+import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import '../services/store_settings_service.dart';
+
+final _supabase = Supabase.instance.client;
+
+const _storeColors = [
+  Color(0xFF2C7873),
+  Color(0xFFE07B39),
+  Color(0xFF6C5CE7),
+  Color(0xFFE84393),
+  Color(0xFF00B894),
+  Color(0xFFE17055),
+];
+
+class HomeCalendarScreen extends StatefulWidget {
+  final List<Map<String, dynamic>> stores;
+  final bool isAdmin;
+  const HomeCalendarScreen({
+    super.key,
+    required this.stores,
+    required this.isAdmin,
+  });
+
+  @override
+  State<HomeCalendarScreen> createState() => _HomeCalendarScreenState();
+}
+
+class _HomeCalendarScreenState extends State<HomeCalendarScreen> {
+  late int _year;
+  late int _month;
+  bool _loading = true;
+
+  // 自分のシフト: storeId → シフト一覧
+  Map<String, List<Map<String, dynamic>>> _myShiftsByStore = {};
+
+  // 選択中の日付
+  String? _selectedDateStr;
+
+  // 管理者用タイムライン: storeId → { dateStr → [{name,start,end,order}] }
+  Map<String, Map<String, List<Map<String, dynamic>>>> _timelineByStore = {};
+  bool _timelineLoading = false;
+
+  // スタッフ用: 展開中の店舗ID（null=未展開）
+  String? _expandedStoreId;
+  bool _storeTimelineLoading = false;
+
+  late Map<String, Color>  _colorMap;
+  late Map<String, String> _nameMap;
+
+  @override
+  void initState() {
+    super.initState();
+    final now = DateTime.now();
+    _year  = now.year;
+    _month = now.month;
+    _buildMaps();
+    _loadMyShifts();
+  }
+
+  void _buildMaps() {
+    _colorMap = {};
+    _nameMap  = {};
+    for (var i = 0; i < widget.stores.length; i++) {
+      final store = _toMap(widget.stores[i]['stores']);
+      final id    = store['id'] as String;
+      _colorMap[id] = _storeColors[i % _storeColors.length];
+      _nameMap[id]  = store['name'] as String? ?? '';
+    }
+  }
+
+  Map<String, dynamic> _toMap(dynamic v) {
+    if (v == null) return {};
+    if (v is Map<String, dynamic>) return v;
+    return Map<String, dynamic>.from(v as Map);
+  }
+
+  // ─── 自分のシフト取得 ─────────────────────────────────────────
+  Future<void> _loadMyShifts() async {
+    setState(() => _loading = true);
+    try {
+      final userId = _supabase.auth.currentUser?.id;
+      if (userId == null) return;
+      final fromStr = DateTime(_year, _month, 1)
+          .toIso8601String().substring(0, 10);
+      final toStr = DateTime(_year, _month + 1, 0)
+          .toIso8601String().substring(0, 10);
+      final newMap = <String, List<Map<String, dynamic>>>{};
+      for (final m in widget.stores) {
+        final store   = _toMap(m['stores']);
+        final storeId = store['id'] as String;
+        final raw = await _supabase
+            .from('shifts')
+            .select('date, start_time, end_time')
+            .eq('store_id', storeId)
+            .eq('user_id', userId)
+            .gte('date', fromStr)
+            .lte('date', toStr)
+            .order('date');
+        newMap[storeId] =
+            raw.map((r) => Map<String, dynamic>.from(r as Map)).toList();
+      }
+      if (mounted) setState(() => _myShiftsByStore = newMap);
+    } catch (e) {
+      debugPrint('loadMyShifts error: $e');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  // ─── 管理者用: 全スタッフタイムライン取得 ────────────────────
+  Future<void> _loadAdminTimeline(String dateStr) async {
+    setState(() => _timelineLoading = true);
+    try {
+      final newMap = <String, Map<String, List<Map<String, dynamic>>>>{};
+      for (final m in widget.stores) {
+        final store   = _toMap(m['stores']);
+        final storeId = store['id'] as String;
+        final raw = await _supabase
+            .from('shifts')
+            .select('start_time, end_time, user_id')
+            .eq('store_id', storeId)
+            .eq('date', dateStr)
+            .order('start_time');
+        if (raw.isEmpty) { newMap[storeId] = {}; continue; }
+
+        final userIds = raw
+            .map((r) => (r as Map)['user_id'] as String?)
+            .where((id) => id != null).cast<String>()
+            .toSet().toList();
+
+        final nameMap = <String, String>{};
+        if (userIds.isNotEmpty) {
+          final profiles = await _supabase
+              .from('user_profiles').select('id, name')
+              .inFilter('id', userIds);
+          for (final p in profiles) {
+            final pm = Map<String, dynamic>.from(p as Map);
+            final pid = pm['id'] as String?;
+            if (pid != null) nameMap[pid] = pm['name'] as String? ?? '不明';
+          }
+        }
+
+        final sortOrderMap = <String, int>{};
+        if (userIds.isNotEmpty) {
+          final memberships = await _supabase
+              .from('store_memberships')
+              .select('user_id, sort_order')
+              .eq('store_id', storeId)
+              .inFilter('user_id', userIds);
+          for (final mm in memberships) {
+            final mem   = Map<String, dynamic>.from(mm as Map);
+            final uid   = mem['user_id'] as String?;
+            final order = mem['sort_order'] as int? ?? 9999;
+            if (uid != null) sortOrderMap[uid] = order;
+          }
+        }
+
+        final list = <Map<String, dynamic>>[];
+        for (final r in raw) {
+          final rec      = Map<String, dynamic>.from(r as Map);
+          final uid      = rec['user_id'] as String?;
+          final startRaw = rec['start_time'] as String?;
+          final endRaw   = rec['end_time']   as String?;
+          final name     = uid != null ? (nameMap[uid] ?? '不明') : 'ヘルプ';
+          final start    = startRaw != null ? startRaw.substring(0, 5) : '09:00';
+          final end      = endRaw   != null ? endRaw.substring(0, 5)   : '00:00';
+          final order    = uid != null ? (sortOrderMap[uid] ?? 9999) : 9999;
+          list.add({'name': name, 'start': start, 'end': end, 'order': order});
+        }
+        list.sort((a, b) => (a['order'] as int).compareTo(b['order'] as int));
+        newMap[storeId] = {dateStr: list};
+      }
+      if (mounted) setState(() => _timelineByStore = newMap);
+    } catch (e) {
+      debugPrint('timeline error: $e');
+    } finally {
+      if (mounted) setState(() => _timelineLoading = false);
+    }
+  }
+
+  // ─── スタッフ用: 特定店舗の全スタッフタイムライン取得 ──────────
+  Future<void> _loadStoreTimeline(String storeId, String dateStr) async {
+    setState(() => _storeTimelineLoading = true);
+    try {
+      final raw = await _supabase
+          .from('shifts')
+          .select('start_time, end_time, user_id')
+          .eq('store_id', storeId)
+          .eq('date', dateStr)
+          .order('start_time');
+
+      final userIds = raw
+          .map((r) => (r as Map)['user_id'] as String?)
+          .where((id) => id != null).cast<String>()
+          .toSet().toList();
+
+      final nameMap = <String, String>{};
+      if (userIds.isNotEmpty) {
+        final profiles = await _supabase
+            .from('user_profiles').select('id, name')
+            .inFilter('id', userIds);
+        for (final p in profiles) {
+          final pm  = Map<String, dynamic>.from(p as Map);
+          final pid = pm['id'] as String?;
+          if (pid != null) nameMap[pid] = pm['name'] as String? ?? '不明';
+        }
+      }
+
+      final sortOrderMap = <String, int>{};
+      if (userIds.isNotEmpty) {
+        final memberships = await _supabase
+            .from('store_memberships')
+            .select('user_id, sort_order')
+            .eq('store_id', storeId)
+            .inFilter('user_id', userIds);
+        for (final mm in memberships) {
+          final mem   = Map<String, dynamic>.from(mm as Map);
+          final uid   = mem['user_id'] as String?;
+          final order = mem['sort_order'] as int? ?? 9999;
+          if (uid != null) sortOrderMap[uid] = order;
+        }
+      }
+
+      final list = <Map<String, dynamic>>[];
+      for (final r in raw) {
+        final rec      = Map<String, dynamic>.from(r as Map);
+        final uid      = rec['user_id'] as String?;
+        final startRaw = rec['start_time'] as String?;
+        final endRaw   = rec['end_time']   as String?;
+        final name     = uid != null ? (nameMap[uid] ?? '不明') : 'ヘルプ';
+        final start    = startRaw != null ? startRaw.substring(0, 5) : '09:00';
+        final end      = endRaw   != null ? endRaw.substring(0, 5)   : '00:00';
+        final order    = uid != null ? (sortOrderMap[uid] ?? 9999) : 9999;
+        list.add({'name': name, 'start': start, 'end': end, 'order': order});
+      }
+      list.sort((a, b) => (a['order'] as int).compareTo(b['order'] as int));
+
+      if (mounted) {
+        setState(() {
+          _timelineByStore[storeId] = {dateStr: list};
+        });
+      }
+    } catch (e) {
+      debugPrint('storeTimeline error: $e');
+    } finally {
+      if (mounted) setState(() => _storeTimelineLoading = false);
+    }
+  }
+
+  void _onDayTap(String dateStr) {
+    if (_selectedDateStr == dateStr) {
+      setState(() {
+        _selectedDateStr  = null;
+        _expandedStoreId  = null;
+      });
+    } else {
+      setState(() {
+        _selectedDateStr  = dateStr;
+        _expandedStoreId  = null;
+        _timelineByStore  = {};
+      });
+      if (widget.isAdmin) _loadAdminTimeline(dateStr);
+    }
+  }
+
+  void _onStoreTap(String storeId, String dateStr) {
+    if (_expandedStoreId == storeId) {
+      setState(() => _expandedStoreId = null);
+    } else {
+      setState(() => _expandedStoreId = storeId);
+      _loadStoreTimeline(storeId, dateStr);
+    }
+  }
+
+  void _prevMonth() {
+    setState(() {
+      _selectedDateStr = null;
+      _expandedStoreId = null;
+      if (_month == 1) { _year--; _month = 12; } else { _month--; }
+    });
+    _loadMyShifts();
+  }
+
+  void _nextMonth() {
+    setState(() {
+      _selectedDateStr = null;
+      _expandedStoreId = null;
+      if (_month == 12) { _year++; _month = 1; } else { _month++; }
+    });
+    _loadMyShifts();
+  }
+
+  // ─── 自分のシフトチップ ───────────────────────────────────────
+  List<Widget> _buildMyChips(String dateStr) {
+    final chips = <Widget>[];
+    for (final entry in _myShiftsByStore.entries) {
+      final storeId  = entry.key;
+      final shifts   = entry.value.where((s) => s['date'] == dateStr).toList();
+      if (shifts.isEmpty) continue;
+      final color = _colorMap[storeId] ?? Colors.grey;
+      for (final s in shifts) {
+        final startRaw = s['start_time'] as String?;
+        final endRaw   = s['end_time']   as String?;
+        final start    = startRaw != null ? startRaw.substring(0, 5) : '?';
+        final endLabel = (endRaw == null || endRaw.startsWith('00:00'))
+            ? 'ラスト' : endRaw.substring(0, 5);
+        chips.add(Container(
+          margin: const EdgeInsets.only(bottom: 2),
+          padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.15),
+            borderRadius: BorderRadius.circular(3),
+            border: Border.all(color: color.withOpacity(0.5), width: 0.8),
+          ),
+          child: Text('$start〜$endLabel',
+              style: TextStyle(
+                  fontSize: 9, color: color, fontWeight: FontWeight.bold),
+              overflow: TextOverflow.ellipsis),
+        ));
+      }
+    }
+    return chips;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        _buildHeader(),
+        _buildLegend(),
+        _buildWeekdayRow(),
+        SizedBox(
+          height: _calendarHeight(context),
+          child: _loading
+              ? const Center(child: CircularProgressIndicator())
+              : _buildCalendarGrid(),
+        ),
+        Expanded(
+          child: _selectedDateStr == null
+              ? _buildPlaceholder()
+              : widget.isAdmin
+                  ? _buildAdminTimelinePanel(_selectedDateStr!)
+                  : _buildStaffTimelinePanel(_selectedDateStr!),
+        ),
+      ],
+    );
+  }
+
+  double _calendarHeight(BuildContext context) {
+    final firstDay    = DateTime(_year, _month, 1);
+    final daysInMonth = DateTime(_year, _month + 1, 0).day;
+    final startWd     = firstDay.weekday % 7;
+    final rows        = ((startWd + daysInMonth) / 7).ceil();
+    return rows * 60.0;
+  }
+
+  Widget _buildHeader() {
+    return Container(
+      color: const Color(0xFFE8F4F3),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          IconButton(
+            icon: const Icon(Icons.chevron_left, color: Color(0xFF2C7873)),
+            onPressed: _prevMonth,
+          ),
+          Text('$_year年$_month月',
+              style: const TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF2C7873))),
+          IconButton(
+            icon: const Icon(Icons.chevron_right, color: Color(0xFF2C7873)),
+            onPressed: _nextMonth,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLegend() {
+    if (widget.stores.length <= 1) return const SizedBox.shrink();
+    return Container(
+      color: Colors.white,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+      child: Wrap(
+        spacing: 12, runSpacing: 4,
+        children: widget.stores.map((m) {
+          final store = _toMap(m['stores']);
+          final id    = store['id'] as String;
+          final color = _colorMap[id] ?? Colors.grey;
+          final name  = _nameMap[id]  ?? '';
+          return Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(width: 10, height: 10,
+                  decoration: BoxDecoration(
+                      color: color,
+                      borderRadius: BorderRadius.circular(2))),
+              const SizedBox(width: 4),
+              Text(name, style: const TextStyle(fontSize: 11)),
+            ],
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  Widget _buildWeekdayRow() {
+    const days   = ['日', '月', '火', '水', '木', '金', '土'];
+    const colors = [
+      Color(0xFFE53935), Colors.black87, Colors.black87,
+      Colors.black87,   Colors.black87, Colors.black87,
+      Color(0xFF1565C0),
+    ];
+    return Container(
+      color: const Color(0xFFF5F7FA),
+      child: Row(
+        children: List.generate(7, (i) => Expanded(
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            alignment: Alignment.center,
+            child: Text(days[i],
+                style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: colors[i])),
+          ),
+        )),
+      ),
+    );
+  }
+
+  Widget _buildCalendarGrid() {
+    final firstDay    = DateTime(_year, _month, 1);
+    final daysInMonth = DateTime(_year, _month + 1, 0).day;
+    final startWd     = firstDay.weekday % 7;
+    final rows        = ((startWd + daysInMonth) / 7).ceil();
+    final today       = DateTime.now();
+    final isNowMonth  = today.year == _year && today.month == _month;
+
+    return GridView.builder(
+      padding: EdgeInsets.zero,
+      physics: const NeverScrollableScrollPhysics(),
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 7,
+        childAspectRatio: MediaQuery.of(context).size.width / 7 / 60.0,
+      ),
+      itemCount: rows * 7,
+      itemBuilder: (context, index) {
+        final dayNum = index - startWd + 1;
+        if (dayNum < 1 || dayNum > daysInMonth) {
+          return Container(
+              decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey.shade100)));
+        }
+        final date       = DateTime(_year, _month, dayNum);
+        final dateStr    = date.toIso8601String().substring(0, 10);
+        final wd         = date.weekday % 7;
+        final isToday    = isNowMonth && today.day == dayNum;
+        final isSelected = _selectedDateStr == dateStr;
+        final isSunday   = wd == 0;
+        final isSaturday = wd == 6;
+        final chips      = _buildMyChips(dateStr);
+
+        return GestureDetector(
+          onTap: () => _onDayTap(dateStr),
+          child: Container(
+            decoration: BoxDecoration(
+              color: isSelected
+                  ? const Color(0xFFD0EFEB)
+                  : isToday ? const Color(0xFFE8F4F3) : Colors.white,
+              border: Border.all(
+                color: isSelected
+                    ? const Color(0xFF2C7873) : Colors.grey.shade200,
+                width: isSelected ? 1.5 : 1.0,
+              ),
+            ),
+            padding: const EdgeInsets.all(2),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 20, height: 20,
+                  alignment: Alignment.center,
+                  decoration: isToday
+                      ? const BoxDecoration(
+                          color: Color(0xFF2C7873), shape: BoxShape.circle)
+                      : null,
+                  child: Text('$dayNum',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: isToday ? FontWeight.bold : FontWeight.normal,
+                        color: isToday ? Colors.white
+                            : isSunday  ? const Color(0xFFE53935)
+                            : isSaturday ? const Color(0xFF1565C0)
+                            : Colors.black87,
+                      )),
+                ),
+                const SizedBox(height: 1),
+                ...chips,
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildPlaceholder() {
+    return Container(
+      color: const Color(0xFFF5F7FA),
+      child: const Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.touch_app_outlined, size: 36, color: Colors.grey),
+            SizedBox(height: 8),
+            Text('日付をタップするとシフトを表示',
+                style: TextStyle(color: Colors.grey, fontSize: 13)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ─── パネル共通ヘッダー ───────────────────────────────────────
+  Widget _buildPanelHeader(String dateStr) {
+    final date     = DateTime.parse(dateStr);
+    const weekdays = ['日', '月', '火', '水', '木', '金', '土'];
+    final wd       = date.weekday % 7;
+    final label    = '${date.year}年${date.month}月${date.day}日（${weekdays[wd]}）';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: const BoxDecoration(
+        color: Color(0xFFE8F4F3),
+        border: Border(top: BorderSide(color: Color(0xFF2C7873), width: 2)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.calendar_today, size: 14, color: Color(0xFF2C7873)),
+          const SizedBox(width: 6),
+          Text(label,
+              style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF2C7873))),
+          const Spacer(),
+          GestureDetector(
+            onTap: () => setState(() {
+              _selectedDateStr = null;
+              _expandedStoreId = null;
+            }),
+            child: const Icon(Icons.close, size: 18, color: Colors.grey),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ─── 管理者タイムラインパネル ─────────────────────────────────
+  Widget _buildAdminTimelinePanel(String dateStr) {
+    return Container(
+      color: Colors.white,
+      child: Column(
+        children: [
+          _buildPanelHeader(dateStr),
+          Expanded(
+            child: _timelineLoading
+                ? const Center(child: CircularProgressIndicator())
+                : _buildGantt(dateStr),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ─── スタッフタイムラインパネル ───────────────────────────────
+  Widget _buildStaffTimelinePanel(String dateStr) {
+    return Container(
+      color: Colors.white,
+      child: Column(
+        children: [
+          _buildPanelHeader(dateStr),
+          Expanded(
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: widget.stores.map((m) {
+                  final store   = _toMap(m['stores']);
+                  final storeId = store['id'] as String;
+                  final color   = _colorMap[storeId] ?? Colors.grey;
+                  final name    = _nameMap[storeId]  ?? '';
+
+                  // 自分のシフト
+                  final myShifts = (_myShiftsByStore[storeId] ?? [])
+                      .where((s) => s['date'] == dateStr)
+                      .toList();
+                  final shiftLabel = myShifts.isEmpty
+                      ? 'シフトなし'
+                      : myShifts.map((s) {
+                          final startRaw = s['start_time'] as String?;
+                          final endRaw   = s['end_time']   as String?;
+                          final start    = startRaw != null
+                              ? startRaw.substring(0, 5) : '?';
+                          final end      = (endRaw == null ||
+                                  endRaw.startsWith('00:00'))
+                              ? 'ラスト'
+                              : endRaw.substring(0, 5);
+                          return '$start〜$end';
+                        }).join(' / ');
+
+                  final isExpanded = _expandedStoreId == storeId;
+
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // 店舗サマリー行（タップで展開）
+                      InkWell(
+                        onTap: () => _onStoreTap(storeId, dateStr),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 12),
+                          decoration: BoxDecoration(
+                            color: isExpanded
+                                ? color.withOpacity(0.08)
+                                : Colors.white,
+                            border: Border(
+                              bottom: BorderSide(
+                                  color: Colors.grey.shade200, width: 1),
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 10, height: 10,
+                                decoration: BoxDecoration(
+                                    color: color,
+                                    shape: BoxShape.circle),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(name,
+                                    style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.bold,
+                                        color: color)),
+                              ),
+                              Text(shiftLabel,
+                                  style: TextStyle(
+                                      fontSize: 13,
+                                      color: myShifts.isEmpty
+                                          ? Colors.grey
+                                          : Colors.black87)),
+                              const SizedBox(width: 8),
+                              Icon(
+                                isExpanded
+                                    ? Icons.expand_less
+                                    : Icons.expand_more,
+                                color: Colors.grey,
+                                size: 18,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      // 展開時: ガントチャート
+                      if (isExpanded)
+                        Container(
+                          color: const Color(0xFFF9FFFE),
+                          child: _storeTimelineLoading
+                              ? const Padding(
+                                  padding: EdgeInsets.all(24),
+                                  child: Center(
+                                      child: CircularProgressIndicator()),
+                                )
+                              : _buildGanttForStore(storeId, dateStr),
+                        ),
+                    ],
+                  );
+                }).toList(),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ─── ガントチャート（管理者用）───────────────────────────────
+  Widget _buildGantt(String dateStr) {
+    final allShifts = <Map<String, dynamic>>[];
+    for (final entry in _timelineByStore.entries) {
+      final storeId = entry.key;
+      final list    = entry.value[dateStr] ?? [];
+      for (final s in list) {
+        allShifts.add({...s, 'storeId': storeId});
+      }
+    }
+    if (allShifts.isEmpty) {
+      return const Center(
+        child: Text('この日のシフトはありません',
+            style: TextStyle(color: Colors.grey, fontSize: 13)),
+      );
+    }
+    int minHour = 24, maxHour = 0;
+    for (final s in allShifts) {
+      final sh = _parseHour(s['start'] as String);
+      var   eh = _parseHour(s['end']   as String);
+      if (eh == 0 || eh <= sh) eh = 24;
+      if (sh < minHour) minHour = sh;
+      if (eh > maxHour) maxHour = eh;
+    }
+    minHour  = (minHour - 1).clamp(0, 23);
+    maxHour  = (maxHour + 1).clamp(1, 25);
+    final totalHours = maxHour - minHour;
+    const rowHeight  = 36.0;
+    const labelWidth = 72.0;
+    const hourWidth  = 52.0;
+    final chartWidth = totalHours * hourWidth;
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (widget.stores.length == 1)
+            _buildGanttRows(allShifts, minHour, totalHours,
+                labelWidth, hourWidth, chartWidth, rowHeight)
+          else
+            ...widget.stores.map((m) {
+              final store       = _toMap(m['stores']);
+              final storeId     = store['id'] as String;
+              final color       = _colorMap[storeId] ?? Colors.grey;
+              final storeName   = _nameMap[storeId]  ?? '';
+              final storeShifts =
+                  allShifts.where((s) => s['storeId'] == storeId).toList();
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(8, 10, 8, 4),
+                    child: Row(children: [
+                      Container(width: 8, height: 8,
+                          decoration: BoxDecoration(
+                              color: color,
+                              borderRadius: BorderRadius.circular(2))),
+                      const SizedBox(width: 6),
+                      Text(storeName,
+                          style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: color)),
+                    ]),
+                  ),
+                  storeShifts.isEmpty
+                      ? const Padding(
+                          padding: EdgeInsets.only(left: 16, bottom: 8),
+                          child: Text('シフトなし',
+                              style: TextStyle(fontSize: 12, color: Colors.grey)))
+                      : _buildGanttRows(storeShifts, minHour, totalHours,
+                          labelWidth, hourWidth, chartWidth, rowHeight),
+                ],
+              );
+            }),
+        ],
+      ),
+    );
+  }
+
+  // ─── ガントチャート（スタッフ用・特定店舗）──────────────────────
+  Widget _buildGanttForStore(String storeId, String dateStr) {
+    final list = (_timelineByStore[storeId] ?? {})[dateStr] ?? [];
+    final allShifts = list.map((s) => {...s, 'storeId': storeId}).toList();
+
+    if (allShifts.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.all(16),
+        child: Text('この日のシフトはありません',
+            style: TextStyle(color: Colors.grey, fontSize: 13)),
+      );
+    }
+
+    int minHour = 24, maxHour = 0;
+    for (final s in allShifts) {
+      final sh = _parseHour(s['start'] as String);
+      var   eh = _parseHour(s['end']   as String);
+      if (eh == 0 || eh <= sh) eh = 24;
+      if (sh < minHour) minHour = sh;
+      if (eh > maxHour) maxHour = eh;
+    }
+    minHour  = (minHour - 1).clamp(0, 23);
+    maxHour  = (maxHour + 1).clamp(1, 25);
+    final totalHours = maxHour - minHour;
+    const rowHeight  = 36.0;
+    const labelWidth = 72.0;
+    const hourWidth  = 52.0;
+    final chartWidth = totalHours * hourWidth;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: _buildGanttRows(allShifts, minHour, totalHours,
+          labelWidth, hourWidth, chartWidth, rowHeight),
+    );
+  }
+
+  // ─── ガントチャート行描画（共通）────────────────────────────────
+  Widget _buildGanttRows(
+    List<Map<String, dynamic>> shifts,
+    int minHour, int totalHours,
+    double labelWidth, double hourWidth,
+    double chartWidth, double rowHeight,
+  ) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            SizedBox(width: labelWidth),
+            ...List.generate(totalHours, (i) {
+              final h = minHour + i;
+              return SizedBox(
+                width: hourWidth,
+                child: Text('${h % 24}:00',
+                    style: const TextStyle(fontSize: 9, color: Colors.grey),
+                    textAlign: TextAlign.left),
+              );
+            }),
+          ]),
+          ...shifts.map((s) {
+            final storeId  = s['storeId'] as String;
+            final color    = _colorMap[storeId] ?? const Color(0xFF2C7873);
+            final name     = s['name']  as String;
+            final startStr = s['start'] as String;
+            final endStr   = s['end']   as String;
+            final sh       = _parseMinute(startStr);
+            var   eh       = _parseMinute(endStr);
+            if (eh <= sh) eh += 24 * 60;
+            final isLast   = endStr.startsWith('00:00');
+            final startOffset =
+                (sh / 60.0 - minHour).clamp(0.0, totalHours.toDouble()) *
+                    hourWidth;
+            final barWidth =
+                ((eh - sh) / 60.0).clamp(0.5, totalHours.toDouble()) *
+                    hourWidth;
+
+            return SizedBox(
+              height: rowHeight,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  SizedBox(
+                    width: labelWidth,
+                    child: Padding(
+                      padding: const EdgeInsets.only(right: 6),
+                      child: Text(name,
+                          style: const TextStyle(fontSize: 11),
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.right),
+                    ),
+                  ),
+                  SizedBox(
+                    width: chartWidth,
+                    child: Stack(children: [
+                      Row(children: List.generate(totalHours, (i) =>
+                          Container(
+                            width: hourWidth, height: rowHeight,
+                            decoration: BoxDecoration(
+                              border: Border(left: BorderSide(
+                                  color: Colors.grey.shade200, width: 1)),
+                            ),
+                          ))),
+                      Positioned(
+                        left: startOffset,
+                        top: (rowHeight - 22) / 2,
+                        child: Container(
+                          width: barWidth, height: 22,
+                          decoration: BoxDecoration(
+                            color: color.withOpacity(0.85),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          alignment: Alignment.center,
+                          child: Text(
+                            isLast ? '$startStr〜ラスト' : '$startStr〜$endStr',
+                            style: const TextStyle(
+                                fontSize: 9,
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ),
+                    ]),
+                  ),
+                ],
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
+  int _parseHour(String t) {
+    final p = t.split(':');
+    if (p.isEmpty) return 0;
+    return int.tryParse(p[0]) ?? 0;
+  }
+
+  int _parseMinute(String t) {
+    final p = t.split(':');
+    if (p.length < 2) return 0;
+    return (int.tryParse(p[0]) ?? 0) * 60 + (int.tryParse(p[1]) ?? 0);
+  }
+}
