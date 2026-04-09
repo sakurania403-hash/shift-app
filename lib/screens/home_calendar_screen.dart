@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../services/store_settings_service.dart';
 
 final _supabase = Supabase.instance.client;
 
-const _storeColors = [
+const _defaultStoreColors = [
   Color(0xFF2C7873),
   Color(0xFFE07B39),
   Color(0xFF6C5CE7),
@@ -12,6 +11,12 @@ const _storeColors = [
   Color(0xFF00B894),
   Color(0xFFE17055),
 ];
+
+Color _hexToColor(String hex) {
+  final h = hex.replaceAll('#', '');
+  if (h.length != 6) return const Color(0xFF2C7873);
+  return Color(int.parse('FF$h', radix: 16));
+}
 
 class HomeCalendarScreen extends StatefulWidget {
   final List<Map<String, dynamic>> stores;
@@ -23,25 +28,18 @@ class HomeCalendarScreen extends StatefulWidget {
   });
 
   @override
-  State<HomeCalendarScreen> createState() => _HomeCalendarScreenState();
+  State<HomeCalendarScreen> createState() => HomeCalendarScreenState();
 }
 
-class _HomeCalendarScreenState extends State<HomeCalendarScreen> {
+class HomeCalendarScreenState extends State<HomeCalendarScreen> {
   late int _year;
   late int _month;
   bool _loading = true;
 
-  // 自分のシフト: storeId → シフト一覧
   Map<String, List<Map<String, dynamic>>> _myShiftsByStore = {};
-
-  // 選択中の日付
   String? _selectedDateStr;
-
-  // 管理者用タイムライン: storeId → { dateStr → [{name,start,end,order}] }
   Map<String, Map<String, List<Map<String, dynamic>>>> _timelineByStore = {};
   bool _timelineLoading = false;
-
-  // スタッフ用: 展開中の店舗ID（null=未展開）
   String? _expandedStoreId;
   bool _storeTimelineLoading = false;
 
@@ -62,12 +60,69 @@ class _HomeCalendarScreenState extends State<HomeCalendarScreen> {
     _colorMap = {};
     _nameMap  = {};
     for (var i = 0; i < widget.stores.length; i++) {
-      final store = _toMap(widget.stores[i]['stores']);
-      final id    = store['id'] as String;
-      _colorMap[id] = _storeColors[i % _storeColors.length];
+      final m       = widget.stores[i];
+      final store   = _toMap(m['stores']);
+      final id      = store['id'] as String;
       _nameMap[id]  = store['name'] as String? ?? '';
+      final displayColorHex = m['display_color'] as String?;
+      if (displayColorHex != null && displayColorHex.isNotEmpty) {
+        _colorMap[id] = _hexToColor(displayColorHex);
+      } else {
+        _colorMap[id] = _defaultStoreColors[i % _defaultStoreColors.length];
+      }
     }
   }
+
+  // ─── 外から呼べる色リロードメソッド ──────────────────────────
+  Future<void> reloadColors() async {
+  debugPrint('=== reloadColors called ===');
+  final userId = _supabase.auth.currentUser?.id;
+  if (userId == null) {
+    debugPrint('=== userId is null ===');
+    return;
+  }
+  try {
+    final storeIds = widget.stores
+        .map((m) => _toMap(m['stores'])['id'] as String)
+        .toList();
+    debugPrint('=== storeIds: $storeIds ===');
+    
+    final rows = await _supabase
+        .from('store_memberships')
+        .select('store_id, display_color')
+        .eq('user_id', userId)
+        .inFilter('store_id', storeIds);
+
+    debugPrint('=== rows: $rows ===');
+
+    final colorMap = <String, String?>{};
+    for (final r in rows) {
+      final m       = Map<String, dynamic>.from(r as Map);
+      final storeId = m['store_id'] as String;
+      colorMap[storeId] = m['display_color'] as String?;
+    }
+    debugPrint('=== colorMap: $colorMap ===');
+
+    if (mounted) {
+      setState(() {
+        for (var i = 0; i < widget.stores.length; i++) {
+          final store = _toMap(widget.stores[i]['stores']);
+          final id    = store['id'] as String;
+          final hex   = colorMap[id];
+          debugPrint('=== updating $id: hex=$hex ===');
+          if (hex != null && hex.isNotEmpty) {
+            _colorMap[id] = _hexToColor(hex);
+          } else {
+            _colorMap[id] =
+                _defaultStoreColors[i % _defaultStoreColors.length];
+          }
+        }
+      });
+    }
+  } catch (e) {
+    debugPrint('reloadColors error: $e');
+  }
+}
 
   Map<String, dynamic> _toMap(dynamic v) {
     if (v == null) return {};
@@ -75,7 +130,6 @@ class _HomeCalendarScreenState extends State<HomeCalendarScreen> {
     return Map<String, dynamic>.from(v as Map);
   }
 
-  // ─── 自分のシフト取得 ─────────────────────────────────────────
   Future<void> _loadMyShifts() async {
     setState(() => _loading = true);
     try {
@@ -108,7 +162,6 @@ class _HomeCalendarScreenState extends State<HomeCalendarScreen> {
     }
   }
 
-  // ─── 管理者用: 全スタッフタイムライン取得 ────────────────────
   Future<void> _loadAdminTimeline(String dateStr) async {
     setState(() => _timelineLoading = true);
     try {
@@ -135,7 +188,7 @@ class _HomeCalendarScreenState extends State<HomeCalendarScreen> {
               .from('user_profiles').select('id, name')
               .inFilter('id', userIds);
           for (final p in profiles) {
-            final pm = Map<String, dynamic>.from(p as Map);
+            final pm  = Map<String, dynamic>.from(p as Map);
             final pid = pm['id'] as String?;
             if (pid != null) nameMap[pid] = pm['name'] as String? ?? '不明';
           }
@@ -179,7 +232,6 @@ class _HomeCalendarScreenState extends State<HomeCalendarScreen> {
     }
   }
 
-  // ─── スタッフ用: 特定店舗の全スタッフタイムライン取得 ──────────
   Future<void> _loadStoreTimeline(String storeId, String dateStr) async {
     setState(() => _storeTimelineLoading = true);
     try {
@@ -251,14 +303,14 @@ class _HomeCalendarScreenState extends State<HomeCalendarScreen> {
   void _onDayTap(String dateStr) {
     if (_selectedDateStr == dateStr) {
       setState(() {
-        _selectedDateStr  = null;
-        _expandedStoreId  = null;
+        _selectedDateStr = null;
+        _expandedStoreId = null;
       });
     } else {
       setState(() {
-        _selectedDateStr  = dateStr;
-        _expandedStoreId  = null;
-        _timelineByStore  = {};
+        _selectedDateStr = dateStr;
+        _expandedStoreId = null;
+        _timelineByStore = {};
       });
       if (widget.isAdmin) _loadAdminTimeline(dateStr);
     }
@@ -291,12 +343,11 @@ class _HomeCalendarScreenState extends State<HomeCalendarScreen> {
     _loadMyShifts();
   }
 
-  // ─── 自分のシフトチップ ───────────────────────────────────────
   List<Widget> _buildMyChips(String dateStr) {
     final chips = <Widget>[];
     for (final entry in _myShiftsByStore.entries) {
-      final storeId  = entry.key;
-      final shifts   = entry.value.where((s) => s['date'] == dateStr).toList();
+      final storeId = entry.key;
+      final shifts  = entry.value.where((s) => s['date'] == dateStr).toList();
       if (shifts.isEmpty) continue;
       final color = _colorMap[storeId] ?? Colors.grey;
       for (final s in shifts) {
@@ -395,10 +446,10 @@ class _HomeCalendarScreenState extends State<HomeCalendarScreen> {
           return Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Container(width: 10, height: 10,
-                  decoration: BoxDecoration(
-                      color: color,
-                      borderRadius: BorderRadius.circular(2))),
+              Container(
+                width: 10, height: 10,
+                decoration: BoxDecoration(
+                    color: color, borderRadius: BorderRadius.circular(2))),
               const SizedBox(width: 4),
               Text(name, style: const TextStyle(fontSize: 11)),
             ],
@@ -492,7 +543,8 @@ class _HomeCalendarScreenState extends State<HomeCalendarScreen> {
                   child: Text('$dayNum',
                       style: TextStyle(
                         fontSize: 11,
-                        fontWeight: isToday ? FontWeight.bold : FontWeight.normal,
+                        fontWeight: isToday
+                            ? FontWeight.bold : FontWeight.normal,
                         color: isToday ? Colors.white
                             : isSunday  ? const Color(0xFFE53935)
                             : isSaturday ? const Color(0xFF1565C0)
@@ -526,12 +578,12 @@ class _HomeCalendarScreenState extends State<HomeCalendarScreen> {
     );
   }
 
-  // ─── パネル共通ヘッダー ───────────────────────────────────────
   Widget _buildPanelHeader(String dateStr) {
     final date     = DateTime.parse(dateStr);
     const weekdays = ['日', '月', '火', '水', '木', '金', '土'];
     final wd       = date.weekday % 7;
-    final label    = '${date.year}年${date.month}月${date.day}日（${weekdays[wd]}）';
+    final label =
+        '${date.year}年${date.month}月${date.day}日（${weekdays[wd]}）';
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       decoration: const BoxDecoration(
@@ -540,7 +592,8 @@ class _HomeCalendarScreenState extends State<HomeCalendarScreen> {
       ),
       child: Row(
         children: [
-          const Icon(Icons.calendar_today, size: 14, color: Color(0xFF2C7873)),
+          const Icon(Icons.calendar_today,
+              size: 14, color: Color(0xFF2C7873)),
           const SizedBox(width: 6),
           Text(label,
               style: const TextStyle(
@@ -560,7 +613,6 @@ class _HomeCalendarScreenState extends State<HomeCalendarScreen> {
     );
   }
 
-  // ─── 管理者タイムラインパネル ─────────────────────────────────
   Widget _buildAdminTimelinePanel(String dateStr) {
     return Container(
       color: Colors.white,
@@ -577,7 +629,6 @@ class _HomeCalendarScreenState extends State<HomeCalendarScreen> {
     );
   }
 
-  // ─── スタッフタイムラインパネル ───────────────────────────────
   Widget _buildStaffTimelinePanel(String dateStr) {
     return Container(
       color: Colors.white,
@@ -594,7 +645,6 @@ class _HomeCalendarScreenState extends State<HomeCalendarScreen> {
                   final color   = _colorMap[storeId] ?? Colors.grey;
                   final name    = _nameMap[storeId]  ?? '';
 
-                  // 自分のシフト
                   final myShifts = (_myShiftsByStore[storeId] ?? [])
                       .where((s) => s['date'] == dateStr)
                       .toList();
@@ -605,7 +655,7 @@ class _HomeCalendarScreenState extends State<HomeCalendarScreen> {
                           final endRaw   = s['end_time']   as String?;
                           final start    = startRaw != null
                               ? startRaw.substring(0, 5) : '?';
-                          final end      = (endRaw == null ||
+                          final end = (endRaw == null ||
                                   endRaw.startsWith('00:00'))
                               ? 'ラスト'
                               : endRaw.substring(0, 5);
@@ -617,7 +667,6 @@ class _HomeCalendarScreenState extends State<HomeCalendarScreen> {
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      // 店舗サマリー行（タップで展開）
                       InkWell(
                         onTap: () => _onStoreTap(storeId, dateStr),
                         child: Container(
@@ -637,8 +686,7 @@ class _HomeCalendarScreenState extends State<HomeCalendarScreen> {
                               Container(
                                 width: 10, height: 10,
                                 decoration: BoxDecoration(
-                                    color: color,
-                                    shape: BoxShape.circle),
+                                    color: color, shape: BoxShape.circle),
                               ),
                               const SizedBox(width: 10),
                               Expanded(
@@ -666,7 +714,6 @@ class _HomeCalendarScreenState extends State<HomeCalendarScreen> {
                           ),
                         ),
                       ),
-                      // 展開時: ガントチャート
                       if (isExpanded)
                         Container(
                           color: const Color(0xFFF9FFFE),
@@ -689,7 +736,6 @@ class _HomeCalendarScreenState extends State<HomeCalendarScreen> {
     );
   }
 
-  // ─── ガントチャート（管理者用）───────────────────────────────
   Widget _buildGantt(String dateStr) {
     final allShifts = <Map<String, dynamic>>[];
     for (final entry in _timelineByStore.entries) {
@@ -735,18 +781,19 @@ class _HomeCalendarScreenState extends State<HomeCalendarScreen> {
               final storeId     = store['id'] as String;
               final color       = _colorMap[storeId] ?? Colors.grey;
               final storeName   = _nameMap[storeId]  ?? '';
-              final storeShifts =
-                  allShifts.where((s) => s['storeId'] == storeId).toList();
+              final storeShifts = allShifts
+                  .where((s) => s['storeId'] == storeId).toList();
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Padding(
                     padding: const EdgeInsets.fromLTRB(8, 10, 8, 4),
                     child: Row(children: [
-                      Container(width: 8, height: 8,
-                          decoration: BoxDecoration(
-                              color: color,
-                              borderRadius: BorderRadius.circular(2))),
+                      Container(
+                        width: 8, height: 8,
+                        decoration: BoxDecoration(
+                            color: color,
+                            borderRadius: BorderRadius.circular(2))),
                       const SizedBox(width: 6),
                       Text(storeName,
                           style: TextStyle(
@@ -759,7 +806,8 @@ class _HomeCalendarScreenState extends State<HomeCalendarScreen> {
                       ? const Padding(
                           padding: EdgeInsets.only(left: 16, bottom: 8),
                           child: Text('シフトなし',
-                              style: TextStyle(fontSize: 12, color: Colors.grey)))
+                              style: TextStyle(
+                                  fontSize: 12, color: Colors.grey)))
                       : _buildGanttRows(storeShifts, minHour, totalHours,
                           labelWidth, hourWidth, chartWidth, rowHeight),
                 ],
@@ -770,10 +818,10 @@ class _HomeCalendarScreenState extends State<HomeCalendarScreen> {
     );
   }
 
-  // ─── ガントチャート（スタッフ用・特定店舗）──────────────────────
   Widget _buildGanttForStore(String storeId, String dateStr) {
     final list = (_timelineByStore[storeId] ?? {})[dateStr] ?? [];
-    final allShifts = list.map((s) => {...s, 'storeId': storeId}).toList();
+    final allShifts =
+        list.map((s) => {...s, 'storeId': storeId}).toList();
 
     if (allShifts.isEmpty) {
       return const Padding(
@@ -806,7 +854,6 @@ class _HomeCalendarScreenState extends State<HomeCalendarScreen> {
     );
   }
 
-  // ─── ガントチャート行描画（共通）────────────────────────────────
   Widget _buildGanttRows(
     List<Map<String, dynamic>> shifts,
     int minHour, int totalHours,
@@ -825,7 +872,8 @@ class _HomeCalendarScreenState extends State<HomeCalendarScreen> {
               return SizedBox(
                 width: hourWidth,
                 child: Text('${h % 24}:00',
-                    style: const TextStyle(fontSize: 9, color: Colors.grey),
+                    style: const TextStyle(
+                        fontSize: 9, color: Colors.grey),
                     textAlign: TextAlign.left),
               );
             }),
@@ -865,26 +913,33 @@ class _HomeCalendarScreenState extends State<HomeCalendarScreen> {
                   SizedBox(
                     width: chartWidth,
                     child: Stack(children: [
-                      Row(children: List.generate(totalHours, (i) =>
-                          Container(
-                            width: hourWidth, height: rowHeight,
-                            decoration: BoxDecoration(
-                              border: Border(left: BorderSide(
-                                  color: Colors.grey.shade200, width: 1)),
-                            ),
-                          ))),
+                      Row(children: List.generate(
+                          totalHours,
+                          (i) => Container(
+                                width: hourWidth,
+                                height: rowHeight,
+                                decoration: BoxDecoration(
+                                  border: Border(
+                                      left: BorderSide(
+                                          color: Colors.grey.shade200,
+                                          width: 1)),
+                                ),
+                              ))),
                       Positioned(
                         left: startOffset,
                         top: (rowHeight - 22) / 2,
                         child: Container(
-                          width: barWidth, height: 22,
+                          width: barWidth,
+                          height: 22,
                           decoration: BoxDecoration(
                             color: color.withOpacity(0.85),
                             borderRadius: BorderRadius.circular(4),
                           ),
                           alignment: Alignment.center,
                           child: Text(
-                            isLast ? '$startStr〜ラスト' : '$startStr〜$endStr',
+                            isLast
+                                ? '$startStr〜ラスト'
+                                : '$startStr〜$endStr',
                             style: const TextStyle(
                                 fontSize: 9,
                                 color: Colors.white,

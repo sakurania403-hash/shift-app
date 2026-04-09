@@ -38,7 +38,7 @@ class StoreService {
 
     final memberships = await _supabase
         .from('store_memberships')
-        .select('store_id, role, stores(id, name)')
+        .select('store_id, role, display_color, stores(id, name)')
         .eq('user_id', userId);
 
     // LinkedMap を Map<String, dynamic> に変換

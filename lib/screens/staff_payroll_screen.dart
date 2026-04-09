@@ -39,6 +39,22 @@ extension PaymentMonthExt on PaymentMonth {
   }
 }
 
+// ─── 色ユーティリティ ──────────────────────────────────────────
+const _defaultStoreColors = [
+  Color(0xFF2C7873),
+  Color(0xFFE07B39),
+  Color(0xFF6C5CE7),
+  Color(0xFFE84393),
+  Color(0xFF00B894),
+  Color(0xFFE17055),
+];
+
+Color _hexToColor(String hex) {
+  final h = hex.replaceAll('#', '');
+  if (h.length != 6) return const Color(0xFF2C7873);
+  return Color(int.parse('FF$h', radix: 16));
+}
+
 // ─── データモデル ───────────────────────────────────────────────
 class _ShiftRecord {
   final DateTime date;
@@ -73,8 +89,8 @@ class _PayPeriod {
 class _StoreData {
   final String storeId;
   final String storeName;
+  Color displayColor;
 
-  // 設定（staff_payroll_settings から）
   int          hourlyWage   = 0;
   RoundingUnit roundingUnit = RoundingUnit.minute;
   RoundingDir  roundingDir  = RoundingDir.truncate;
@@ -84,16 +100,18 @@ class _StoreData {
   String       holidayClose = '22:00';
   List<Map<String, dynamic>> breakRules = [];
 
-  // シフト
   List<_ShiftRecord> shifts = [];
   bool shiftsLoading = false;
 
-  // 給料実績
   int? actualPay;
   bool actualSaving = false;
   late TextEditingController actualCtrl;
 
-  _StoreData({required this.storeId, required this.storeName}) {
+  _StoreData({
+    required this.storeId,
+    required this.storeName,
+    required this.displayColor,
+  }) {
     actualCtrl = TextEditingController();
   }
 
@@ -165,10 +183,10 @@ class StaffPayrollScreen extends StatefulWidget {
   const StaffPayrollScreen({super.key, this.stores, this.storeId});
 
   @override
-  State<StaffPayrollScreen> createState() => _StaffPayrollScreenState();
+  State<StaffPayrollScreen> createState() => StaffPayrollScreenState();
 }
 
-class _StaffPayrollScreenState extends State<StaffPayrollScreen> {
+class StaffPayrollScreenState extends State<StaffPayrollScreen> {
   late int _year;
   late int _month;
   bool _initialLoading = true;
@@ -196,6 +214,39 @@ class _StaffPayrollScreenState extends State<StaffPayrollScreen> {
     return Map<String, dynamic>.from(v as Map);
   }
 
+  // ─── 外から呼べる色リロードメソッド ──────────────────────────
+  Future<void> reloadColors() async {
+    final userId = _supabase.auth.currentUser?.id;
+    if (userId == null) return;
+    try {
+      final storeIds = _storeData.map((d) => d.storeId).toList();
+      final rows = await _supabase
+          .from('store_memberships')
+          .select('store_id, display_color')
+          .eq('user_id', userId)
+          .inFilter('store_id', storeIds);
+
+      if (mounted) {
+        setState(() {
+          for (var i = 0; i < _storeData.length; i++) {
+            final d = _storeData[i];
+            final matching = rows
+                .where((r) => (r as Map)['store_id'] == d.storeId)
+                .toList();
+            if (matching.isNotEmpty) {
+              final hex = (matching.first as Map)['display_color'] as String?;
+              if (hex != null && hex.isNotEmpty) {
+                d.displayColor = _hexToColor(hex);
+              }
+            }
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('payroll reloadColors error: $e');
+    }
+  }
+
   // ─── 初期化 ──────────────────────────────────────────────────
   Future<void> _init() async {
     List<Map<String, dynamic>> storeList = [];
@@ -209,6 +260,9 @@ class _StaffPayrollScreenState extends State<StaffPayrollScreen> {
 
     // 設定一括取得
     Map<String, Map<String, dynamic>> savedSettings = {};
+    // 表示色一括取得
+    Map<String, String?> colorMap = {};
+
     if (userId != null && storeList.isNotEmpty) {
       final storeIds = storeList
           .map((m) => (_toMap(m['stores'])['id'] as String))
@@ -224,16 +278,42 @@ class _StaffPayrollScreenState extends State<StaffPayrollScreen> {
           savedSettings[m['store_id'] as String] = m;
         }
       } catch (_) {}
+
+      try {
+        final rows = await _supabase
+            .from('store_memberships')
+            .select('store_id, display_color')
+            .eq('user_id', userId)
+            .inFilter('store_id', storeIds);
+        for (final r in rows) {
+          final m = Map<String, dynamic>.from(r as Map);
+          colorMap[m['store_id'] as String] = m['display_color'] as String?;
+        }
+      } catch (_) {}
     }
 
     final dataList = <_StoreData>[];
-    for (final m in storeList) {
+    for (var i = 0; i < storeList.length; i++) {
+      final m       = storeList[i];
       final store   = _toMap(m['stores']);
       final storeId = store['id'] as String;
       final name    = store['name'] as String? ?? '';
       final saved   = savedSettings[storeId];
 
-      final d = _StoreData(storeId: storeId, storeName: name);
+      // 表示色の解決
+      Color resolvedColor;
+      final hex = colorMap[storeId];
+      if (hex != null && hex.isNotEmpty) {
+        resolvedColor = _hexToColor(hex);
+      } else {
+        resolvedColor = _defaultStoreColors[i % _defaultStoreColors.length];
+      }
+
+      final d = _StoreData(
+        storeId:      storeId,
+        storeName:    name,
+        displayColor: resolvedColor,
+      );
       d.hourlyWage   = saved?['hourly_wage']   as int?    ?? 0;
       d.closingDay   = saved?['closing_day']   as int?    ?? 0;
       d.paymentMonth = PaymentMonth.values[saved?['payment_month'] as int? ?? 1];
@@ -253,7 +333,6 @@ class _StaffPayrollScreenState extends State<StaffPayrollScreen> {
       });
     }
 
-    // シフト・実績を並行取得
     await Future.wait([
       for (final d in dataList) _loadShifts(d),
       _loadActuals(),
@@ -351,7 +430,6 @@ class _StaffPayrollScreenState extends State<StaffPayrollScreen> {
   }
 
   Future<void> _reloadAll() async {
-    // 設定を再読み込み（設定画面で変更された可能性）
     final userId = _supabase.auth.currentUser?.id;
     if (userId == null) return;
     final storeIds = _storeData.map((d) => d.storeId).toList();
@@ -394,7 +472,6 @@ class _StaffPayrollScreenState extends State<StaffPayrollScreen> {
         backgroundColor: const Color(0xFF2C7873),
         foregroundColor: Colors.white,
         actions: [
-          // 設定画面から戻ったとき再読み込み
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _reloadAll,
@@ -418,7 +495,6 @@ class _StaffPayrollScreenState extends State<StaffPayrollScreen> {
   }
 
   Widget _buildBody() {
-    // 合計
     final totalMin  = _storeData.fold(0, (a, d) => a + d.totalMinutes);
     final totalEst  = _storeData.fold(0, (a, d) => a + d.totalWage);
     final totalAct  = _storeData.every((d) => d.actualPay != null)
@@ -431,7 +507,7 @@ class _StaffPayrollScreenState extends State<StaffPayrollScreen> {
     return ListView(
       padding: const EdgeInsets.all(12),
       children: [
-        // ─── 合計サマリーカード ───────────────────────────────
+        // 合計サマリーカード
         Container(
           margin: const EdgeInsets.only(bottom: 16),
           decoration: BoxDecoration(
@@ -454,7 +530,8 @@ class _StaffPayrollScreenState extends State<StaffPayrollScreen> {
                   const Icon(Icons.functions, color: Colors.white70, size: 14),
                   const SizedBox(width: 6),
                   Text('$_year年$_month月払い 合計',
-                      style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                      style: const TextStyle(
+                          color: Colors.white70, fontSize: 12)),
                 ],
               ),
               const SizedBox(height: 12),
@@ -464,7 +541,8 @@ class _StaffPayrollScreenState extends State<StaffPayrollScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text('総勤務時間',
-                          style: TextStyle(color: Colors.white60, fontSize: 11)),
+                          style: TextStyle(
+                              color: Colors.white60, fontSize: 11)),
                       const SizedBox(height: 4),
                       Text('${h}時間${m}分',
                           style: const TextStyle(
@@ -478,12 +556,14 @@ class _StaffPayrollScreenState extends State<StaffPayrollScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text('概算給与',
-                          style: TextStyle(color: Colors.white60, fontSize: 11)),
+                          style: TextStyle(
+                              color: Colors.white60, fontSize: 11)),
                       const SizedBox(height: 4),
                       Text(
                         allHaveWage ? '¥${_fmt(totalEst)}' : '—',
                         style: TextStyle(
-                          color: allHaveWage ? Colors.white : Colors.white38,
+                          color: allHaveWage
+                              ? Colors.white : Colors.white38,
                           fontSize: allHaveWage ? 22 : 14,
                           fontWeight: FontWeight.bold,
                         ),
@@ -496,12 +576,14 @@ class _StaffPayrollScreenState extends State<StaffPayrollScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text('実績合計',
-                          style: TextStyle(color: Colors.white60, fontSize: 11)),
+                          style: TextStyle(
+                              color: Colors.white60, fontSize: 11)),
                       const SizedBox(height: 4),
                       Text(
                         totalAct != null ? '¥${_fmt(totalAct)}' : '—',
                         style: TextStyle(
-                          color: totalAct != null ? Colors.white : Colors.white38,
+                          color: totalAct != null
+                              ? Colors.white : Colors.white38,
                           fontSize: totalAct != null ? 22 : 14,
                           fontWeight: FontWeight.bold,
                         ),
@@ -514,7 +596,6 @@ class _StaffPayrollScreenState extends State<StaffPayrollScreen> {
           ),
         ),
 
-        // ─── 店舗ごと行 ───────────────────────────────────────
         ...(_storeData.map((d) => _buildStoreRow(d))),
         const SizedBox(height: 24),
       ],
@@ -537,21 +618,29 @@ class _StaffPayrollScreenState extends State<StaffPayrollScreen> {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            // 店舗名
+            // 店舗名（色付き四角 + 黒字店名）
             Expanded(
               flex: 3,
               child: Row(
                 children: [
-                  const Icon(Icons.store, size: 16, color: Color(0xFF2C7873)),
-                  const SizedBox(width: 6),
+                  // 選択した色の四角
+                  Container(
+                    width: 14, height: 14,
+                    decoration: BoxDecoration(
+                      color: d.displayColor,
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(d.storeName,
                             style: const TextStyle(
-                                fontSize: 13, fontWeight: FontWeight.bold,
-                                color: Color(0xFF2C7873))),
+                                fontSize: 13,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.black87)),
                         Text(period.label,
                             style: const TextStyle(
                                 fontSize: 10, color: Colors.grey)),
@@ -572,12 +661,14 @@ class _StaffPayrollScreenState extends State<StaffPayrollScreen> {
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
                         const Text('勤務時間',
-                            style: TextStyle(fontSize: 10, color: Colors.grey)),
+                            style: TextStyle(
+                                fontSize: 10, color: Colors.grey)),
                         const SizedBox(height: 2),
                         Text(
                           d.shifts.isEmpty ? '--' : '${h}h${m}m',
                           style: const TextStyle(
-                              fontSize: 13, fontWeight: FontWeight.bold),
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold),
                         ),
                       ],
                     ),
@@ -616,25 +707,31 @@ class _StaffPayrollScreenState extends State<StaffPayrollScreen> {
                     child: TextField(
                       controller: d.actualCtrl,
                       keyboardType: TextInputType.number,
-                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                      inputFormatters: [
+                        FilteringTextInputFormatter.digitsOnly
+                      ],
                       textAlign: TextAlign.center,
                       style: const TextStyle(fontSize: 13),
                       decoration: InputDecoration(
                         hintText: '未入力',
-                        hintStyle: const TextStyle(fontSize: 12, color: Colors.grey),
+                        hintStyle: const TextStyle(
+                            fontSize: 12, color: Colors.grey),
                         isDense: true,
-                        prefixText: d.actualCtrl.text.isNotEmpty ? '¥' : null,
+                        prefixText:
+                            d.actualCtrl.text.isNotEmpty ? '¥' : null,
                         contentPadding: const EdgeInsets.symmetric(
                             horizontal: 8, vertical: 6),
                         border: const OutlineInputBorder(),
                         suffixIcon: d.actualSaving
                             ? const SizedBox(
                                 width: 14, height: 14,
-                                child: CircularProgressIndicator(strokeWidth: 2))
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2))
                             : null,
                       ),
                       onSubmitted: (v) => _saveActual(d, v),
-                      onTapOutside: (_) => _saveActual(d, d.actualCtrl.text),
+                      onTapOutside: (_) =>
+                          _saveActual(d, d.actualCtrl.text),
                     ),
                   ),
                 ],
@@ -658,20 +755,23 @@ class _StaffPayrollScreenState extends State<StaffPayrollScreen> {
             icon: const Icon(Icons.chevron_left, color: Color(0xFF2C7873)),
             onPressed: () {
               setState(() {
-                if (_month == 1) { _year--; _month = 12; } else { _month--; }
+                if (_month == 1) { _year--; _month = 12; }
+                else { _month--; }
               });
               _reloadAll();
             },
           ),
           Text('$_year年$_month月払い',
               style: const TextStyle(
-                  fontSize: 17, fontWeight: FontWeight.bold,
+                  fontSize: 17,
+                  fontWeight: FontWeight.bold,
                   color: Color(0xFF2C7873))),
           IconButton(
             icon: const Icon(Icons.chevron_right, color: Color(0xFF2C7873)),
             onPressed: () {
               setState(() {
-                if (_month == 12) { _year++; _month = 1; } else { _month++; }
+                if (_month == 12) { _year++; _month = 1; }
+                else { _month++; }
               });
               _reloadAll();
             },

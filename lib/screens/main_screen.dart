@@ -22,10 +22,17 @@ class MainScreen extends StatefulWidget {
 class _MainScreenState extends State<MainScreen> {
   final _authService  = AuthService();
   final _storeService = StoreService();
+
+  final _calendarKey = GlobalKey<HomeCalendarScreenState>();
+  final _payrollKey  = GlobalKey<StaffPayrollScreenState>();
+  final _settingsKey = GlobalKey<StaffSettingsScreenState>();
+
   List<Map<String, dynamic>> _stores = [];
   bool _isLoading = true;
   bool _isAdmin   = false;
   int  _selectedIndex = 0;
+
+  List<Widget>? _screens;
 
   @override
   void initState() {
@@ -42,10 +49,20 @@ class _MainScreenState extends State<MainScreen> {
         _stores    = stores;
         _isAdmin   = isAdmin;
         _isLoading = false;
+        _screens   = null;
       });
     } catch (e) {
       setState(() => _isLoading = false);
     }
+  }
+
+  // 設定保存後：カレンダー・給料計算・設定画面の色を即時更新
+  Future<void> _onSettingsSaved() async {
+    await Future.wait([
+      _calendarKey.currentState?.reloadColors() ?? Future.value(),
+      _payrollKey.currentState?.reloadColors()  ?? Future.value(),
+      _settingsKey.currentState?.reloadColors() ?? Future.value(),
+    ]);
   }
 
   Future<void> _signOut() async {
@@ -57,10 +74,38 @@ class _MainScreenState extends State<MainScreen> {
     }
   }
 
-  Map<String, dynamic> _toMap(dynamic value) {
-    if (value == null) return {};
-    if (value is Map<String, dynamic>) return value;
-    return Map<String, dynamic>.from(value as Map);
+  List<Widget> _buildScreens() {
+    if (_isAdmin) {
+      return [
+        HomeCalendarScreen(
+          key: _calendarKey,
+          stores: _stores,
+          isAdmin: true,
+        ),
+        const RecruitmentScreen(),
+        const MemberManagementScreen(),
+        const InviteScreen(),
+        StoreSettingsScreen(),
+      ];
+    } else {
+      return [
+        HomeCalendarScreen(
+          key: _calendarKey,
+          stores: _stores,
+          isAdmin: false,
+        ),
+        const RecruitmentScreen(),
+        StaffPayrollScreen(
+          key: _payrollKey,
+          stores: _stores,
+        ),
+        StaffSettingsScreen(
+          key: _settingsKey,
+          stores: _stores,
+          onSaved: _onSettingsSaved,
+        ),
+      ];
+    }
   }
 
   @override
@@ -75,7 +120,8 @@ class _MainScreenState extends State<MainScreen> {
       return const StoreSetupScreen();
     }
 
-    // ─── 管理者ナビ ───────────────────────────────────────────
+    _screens ??= _buildScreens();
+
     const adminDestinations = [
       NavigationDestination(
         icon: Icon(Icons.calendar_month_outlined),
@@ -104,7 +150,6 @@ class _MainScreenState extends State<MainScreen> {
       ),
     ];
 
-    // ─── スタッフナビ ─────────────────────────────────────────
     const staffDestinations = [
       NavigationDestination(
         icon: Icon(Icons.calendar_month_outlined),
@@ -128,25 +173,8 @@ class _MainScreenState extends State<MainScreen> {
       ),
     ];
 
-    // ─── 管理者画面リスト ──────────────────────────────────────
-    final adminScreens = [
-      HomeCalendarScreen(stores: _stores, isAdmin: true),
-      const RecruitmentScreen(),
-      const MemberManagementScreen(),
-      const InviteScreen(),
-      const StoreSettingsScreen(),
-    ];
-
-    // ─── スタッフ画面リスト ────────────────────────────────────
-    final staffScreens = [
-      HomeCalendarScreen(stores: _stores, isAdmin: false),
-      const RecruitmentScreen(),
-      StaffPayrollScreen(stores: _stores),
-      StaffSettingsScreen(stores: _stores),
-    ];
-
     final destinations = _isAdmin ? adminDestinations : staffDestinations;
-    final screens      = _isAdmin ? adminScreens      : staffScreens;
+    final screens      = _screens!;
     final currentIndex =
         _selectedIndex >= screens.length ? 0 : _selectedIndex;
 
