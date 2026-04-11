@@ -2,10 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../services/store_settings_service.dart';
 import '../services/shift_service.dart';
+import '../services/notification_service.dart';
+import '../services/member_service.dart';
 
 class ShiftTimelineScreen extends StatefulWidget {
   final DateTime date;
   final String storeId;
+  final String storeName;
   final List<Map<String, dynamic>> confirmedShifts;
   final List<Map<String, dynamic>> staff;
   final List<Map<String, dynamic>> shiftRequests;
@@ -16,6 +19,7 @@ class ShiftTimelineScreen extends StatefulWidget {
     super.key,
     required this.date,
     required this.storeId,
+    required this.storeName,
     required this.confirmedShifts,
     required this.staff,
     required this.shiftRequests,
@@ -28,35 +32,35 @@ class ShiftTimelineScreen extends StatefulWidget {
 }
 
 class _ShiftTimelineScreenState extends State<ShiftTimelineScreen> {
-  final _settingsService = StoreSettingsService();
-  final _shiftService = ShiftService();
-  List<Map<String, dynamic>> _workHours = [];
-  List<Map<String, dynamic>> _staffingSlots = [];
-  List<Map<String, dynamic>> _tempShifts = [];
+  final _settingsService     = StoreSettingsService();
+  final _shiftService        = ShiftService();
+  final _notificationService = NotificationService();
+  final _memberService       = MemberService();
+
+  List<Map<String, dynamic>> _workHours      = [];
+  List<Map<String, dynamic>> _staffingSlots  = [];
+  List<Map<String, dynamic>> _tempShifts     = [];
   List<Map<String, dynamic>> _confirmedShifts = [];
-  bool _isLoading = true;
-  bool _isHoliday = false;
+  bool _isLoading  = true;
+  bool _isHoliday  = false;
   late DateTime _currentDate;
 
   @override
   void initState() {
     super.initState();
-    _currentDate = widget.date;
+    _currentDate     = widget.date;
     _confirmedShifts = List.from(widget.confirmedShifts);
     _loadData();
   }
 
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
-    final workHours =
-        await _settingsService.getWorkHours(widget.storeId);
-    final staffingSlots =
-        await _settingsService.getStaffingSlots(widget.storeId);
-    final holidays = await StoreSettingsService.getJapaneseHolidays();
-    final isHoliday =
-        await StoreSettingsService.isHoliday(_currentDate, holidays);
+    final workHours      = await _settingsService.getWorkHours(widget.storeId);
+    final staffingSlots  = await _settingsService.getStaffingSlots(widget.storeId);
+    final holidays       = await StoreSettingsService.getJapaneseHolidays();
+    final isHoliday      = StoreSettingsService.isHoliday(_currentDate, holidays);
 
-    final dateStr = _currentDate.toIso8601String().substring(0, 10);
+    final dateStr    = _currentDate.toIso8601String().substring(0, 10);
     final allConfirmed = await _shiftService.getConfirmedShifts(
       storeId: widget.storeId,
       from: _currentDate,
@@ -69,13 +73,14 @@ class _ShiftTimelineScreenState extends State<ShiftTimelineScreen> {
         .where((s) => s['staff_type'] != 'temp' && s['date'] == dateStr)
         .toList();
 
+    
     setState(() {
-      _workHours = workHours;
-      _staffingSlots = staffingSlots;
-      _isHoliday = isHoliday;
-      _tempShifts = temps;
+      _workHours      = workHours;
+      _staffingSlots  = staffingSlots;
+      _isHoliday      = isHoliday;
+      _tempShifts     = temps;
       _confirmedShifts = regular;
-      _isLoading = false;
+      _isLoading      = false;
     });
   }
 
@@ -144,8 +149,7 @@ class _ShiftTimelineScreenState extends State<ShiftTimelineScreen> {
 
   Map<String, dynamic>? _getRequestShift(String userId) {
     final found = widget.shiftRequests
-        .where((s) =>
-            s['user_id'] == userId && s['date'] == _dateStr)
+        .where((s) => s['user_id'] == userId && s['date'] == _dateStr)
         .toList();
     return found.isNotEmpty ? found.first : null;
   }
@@ -186,13 +190,13 @@ class _ShiftTimelineScreenState extends State<ShiftTimelineScreen> {
 
   Future<void> _showConfirmFromTimelineDialog(
       Map<String, dynamic> staffMember) async {
-    final profile = staffMember['user_profiles'] as Map<String, dynamic>;
-    final userId = profile['id'] as String;
-    final name = profile['name'] as String;
+    final profile   = staffMember['user_profiles'] as Map<String, dynamic>;
+    final userId    = profile['id']   as String;
+    final name      = profile['name'] as String;
     final confirmed = _getConfirmedShift(userId);
-    final request = _getRequestShift(userId);
-    final isDayOff = _isDayOff(userId);
-    final fmt = DateFormat('M/d(E)', 'ja');
+    final request   = _getRequestShift(userId);
+    final isDayOff  = _isDayOff(userId);
+    final fmt       = DateFormat('M/d(E)', 'ja');
 
     String startTime =
         confirmed?['start_time']?.toString().substring(0, 5) ??
@@ -207,7 +211,7 @@ class _ShiftTimelineScreenState extends State<ShiftTimelineScreen> {
     bool isOff = isDayOff && confirmed == null;
 
     final startController = TextEditingController(text: startTime);
-    final endController = TextEditingController(text: endTime);
+    final endController   = TextEditingController(text: endTime);
 
     await showDialog(
       context: context,
@@ -309,8 +313,8 @@ class _ShiftTimelineScreenState extends State<ShiftTimelineScreen> {
                 onPressed: () async {
                   await _shiftService.deleteShift(
                     storeId: widget.storeId,
-                    userId: userId,
-                    date: _currentDate,
+                    userId:  userId,
+                    date:    _currentDate,
                   );
                   if (context.mounted) Navigator.pop(context);
                   await _loadData();
@@ -326,9 +330,9 @@ class _ShiftTimelineScreenState extends State<ShiftTimelineScreen> {
               onPressed: () async {
                 if (!isOff) {
                   await _shiftService.upsertShift(
-                    storeId: widget.storeId,
-                    userId: userId,
-                    date: _currentDate,
+                    storeId:   widget.storeId,
+                    userId:    userId,
+                    date:      _currentDate,
                     startTime: startController.text.trim(),
                     endTime: isLast
                         ? null
@@ -337,12 +341,27 @@ class _ShiftTimelineScreenState extends State<ShiftTimelineScreen> {
                             : endController.text.trim(),
                     isLast: isLast,
                   );
+
+                  // ── シフト確定通知：該当スタッフへ送信 ──
+                  try {
+                    final start = startController.text.trim();
+                    final end   = isLast ? 'ラスト' : endController.text.trim();
+                    final dateLabel = DateFormat('M/d(E)', 'ja').format(_currentDate);
+                    await _notificationService.sendShiftConfirmed(
+                    storeId:         widget.storeId,
+                    recipientUserId: userId,
+                    storeName:       widget.storeName,
+                    periodLabel:     '$dateLabel $start〜$end',
+                  );
+                  } catch (_) {
+                    // 通知失敗はサイレントに無視
+                  }
                 } else {
                   if (confirmed != null) {
                     await _shiftService.deleteShift(
                       storeId: widget.storeId,
-                      userId: userId,
-                      date: _currentDate,
+                      userId:  userId,
+                      date:    _currentDate,
                     );
                   }
                 }
@@ -362,9 +381,9 @@ class _ShiftTimelineScreenState extends State<ShiftTimelineScreen> {
   }
 
   Future<void> _showAddTempDialog() async {
-    final nameController = TextEditingController();
+    final nameController  = TextEditingController();
     final startController = TextEditingController();
-    final endController = TextEditingController();
+    final endController   = TextEditingController();
     bool isLast = false;
 
     await showDialog(
@@ -445,8 +464,8 @@ class _ShiftTimelineScreenState extends State<ShiftTimelineScreen> {
                   return;
                 }
                 await _shiftService.upsertTempShift(
-                  storeId: widget.storeId,
-                  date: _currentDate,
+                  storeId:   widget.storeId,
+                  date:      _currentDate,
                   tempLabel: nameController.text.trim(),
                   startTime: startController.text.trim(),
                   endTime: isLast
@@ -472,11 +491,11 @@ class _ShiftTimelineScreenState extends State<ShiftTimelineScreen> {
   }
 
   Future<void> _showEditTempDialog(Map<String, dynamic> shift) async {
-    final nameController =
-        TextEditingController(text: shift['temp_label'] ?? '');
+    final nameController  = TextEditingController(
+        text: shift['temp_label'] ?? '');
     final startController = TextEditingController(
         text: shift['start_time']?.toString().substring(0, 5) ?? '');
-    final endController = TextEditingController(
+    final endController   = TextEditingController(
         text: shift['end_time']?.toString().substring(0, 5) ?? '');
     bool isLast = shift['is_last'] == true;
 
@@ -557,7 +576,7 @@ class _ShiftTimelineScreenState extends State<ShiftTimelineScreen> {
             ElevatedButton(
               onPressed: () async {
                 await _shiftService.updateTempShift(
-                  shiftId: shift['id'],
+                  shiftId:   shift['id'],
                   tempLabel: nameController.text.trim(),
                   startTime: startController.text.trim(),
                   endTime: isLast
@@ -706,14 +725,12 @@ class _ShiftTimelineScreenState extends State<ShiftTimelineScreen> {
                     );
                   }
 
-                  final startKey =
-                      displayShift.containsKey('start_time')
-                          ? 'start_time'
-                          : 'preferred_start';
-                  final endKey =
-                      displayShift.containsKey('end_time')
-                          ? 'end_time'
-                          : 'preferred_end';
+                  final startKey = displayShift.containsKey('start_time')
+                      ? 'start_time'
+                      : 'preferred_start';
+                  final endKey = displayShift.containsKey('end_time')
+                      ? 'end_time'
+                      : 'preferred_end';
 
                   final shiftStart = _timeToDouble(
                       displayShift[startKey]?.toString().substring(0, 5) ??
@@ -733,18 +750,13 @@ class _ShiftTimelineScreenState extends State<ShiftTimelineScreen> {
                           .clamp(0.0, 1.0 - leftRatio);
 
                   final startLabel =
-                      displayShift[startKey]?.toString().substring(0, 5) ??
-                          '';
+                      displayShift[startKey]?.toString().substring(0, 5) ?? '';
                   final endLabel = isLast
                       ? 'L'
-                      : displayShift[endKey]
-                              ?.toString()
-                              .substring(0, 5) ??
-                          '';
+                      : displayShift[endKey]?.toString().substring(0, 5) ?? '';
 
-                  final barColor = isConfirmed
-                      ? Colors.teal[500]!
-                      : Colors.teal[200]!;
+                  final barColor =
+                      isConfirmed ? Colors.teal[500]! : Colors.teal[200]!;
                   final textColor =
                       isConfirmed ? Colors.white : Colors.teal[800]!;
 
@@ -840,8 +852,7 @@ class _ShiftTimelineScreenState extends State<ShiftTimelineScreen> {
                           .clamp(0.0, 1.0 - leftRatio);
                   final endLabel = isLast
                       ? 'L'
-                      : shift['end_time']?.toString().substring(0, 5) ??
-                          '';
+                      : shift['end_time']?.toString().substring(0, 5) ?? '';
 
                   return Stack(
                     children: [
@@ -884,9 +895,9 @@ class _ShiftTimelineScreenState extends State<ShiftTimelineScreen> {
   }
 
   Widget _buildStaffingChart(double startHour, double endHour) {
-    final slots = _todaySlots;
+    final slots      = _todaySlots;
     final totalHours = endHour - startHour;
-    final allShifts = [..._confirmedShifts, ..._tempShifts];
+    final allShifts  = [..._confirmedShifts, ..._tempShifts];
 
     final timePoints = <double>[];
     for (double h = startHour; h < endHour; h += 0.5) {
@@ -985,18 +996,15 @@ class _ShiftTimelineScreenState extends State<ShiftTimelineScreen> {
         if (slots.isNotEmpty) ...[
           const SizedBox(height: 8),
           ...slots.map((slot) {
-            final start =
-                slot['slot_start'].toString().substring(0, 5);
-            final end = slot['slot_end'].toString().substring(0, 5);
+            final start = slot['slot_start'].toString().substring(0, 5);
+            final end   = slot['slot_end'].toString().substring(0, 5);
             final minStaff = slot['min_staff'] as int;
             return Padding(
               padding: const EdgeInsets.only(bottom: 4),
               child: Row(
                 children: [
                   Container(
-                      width: 12,
-                      height: 12,
-                      color: Colors.orange[300]),
+                      width: 12, height: 12, color: Colors.orange[300]),
                   const SizedBox(width: 6),
                   Text('$start 〜 $end：$minStaff名必要',
                       style: const TextStyle(fontSize: 12)),
@@ -1017,17 +1025,16 @@ class _ShiftTimelineScreenState extends State<ShiftTimelineScreen> {
       shortages.add('全時間帯で人員不足');
     } else {
       for (var slot in _todaySlots) {
-        final start = _timeToDouble(
+        final start    = _timeToDouble(
             slot['slot_start'].toString().substring(0, 5));
-        final end = _timeToDouble(
+        final end      = _timeToDouble(
             slot['slot_end'].toString().substring(0, 5));
         final minStaff = slot['min_staff'] as int;
-        final midTime = (start + end) / 2;
-        final count = _getStaffAtTime(midTime, allShifts).length;
+        final midTime  = (start + end) / 2;
+        final count    = _getStaffAtTime(midTime, allShifts).length;
         if (count < minStaff) {
-          final startStr =
-              slot['slot_start'].toString().substring(0, 5);
-          final endStr = slot['slot_end'].toString().substring(0, 5);
+          final startStr = slot['slot_start'].toString().substring(0, 5);
+          final endStr   = slot['slot_end'].toString().substring(0, 5);
           shortages.add(
               '$startStr〜$endStr：${count}名 / 必要${minStaff}名（${minStaff - count}名不足）');
         }
@@ -1086,7 +1093,7 @@ class _ShiftTimelineScreenState extends State<ShiftTimelineScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final fmt = DateFormat('M/d(E)', 'ja');
+    final fmt       = DateFormat('M/d(E)', 'ja');
     final workHours = _todayWorkHours;
 
     if (_isLoading) {
@@ -1100,7 +1107,7 @@ class _ShiftTimelineScreenState extends State<ShiftTimelineScreen> {
     }
 
     double startHour = 9.0;
-    double endHour = 22.0;
+    double endHour   = 22.0;
     if (workHours != null) {
       startHour = _timeToDouble(
           workHours['work_start'].toString().substring(0, 5));
@@ -1109,7 +1116,7 @@ class _ShiftTimelineScreenState extends State<ShiftTimelineScreen> {
     }
 
     return Scaffold(
-  appBar: AppBar(
+      appBar: AppBar(
         title: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -1121,8 +1128,7 @@ class _ShiftTimelineScreenState extends State<ShiftTimelineScreen> {
               constraints: const BoxConstraints(),
             ),
             const SizedBox(width: 4),
-            Text(
-                '${fmt.format(_currentDate)} ${_isHoliday ? '（休日）' : '（平日）'}'),
+            Text('${fmt.format(_currentDate)} ${_isHoliday ? '（休日）' : '（平日）'}'),
             const SizedBox(width: 4),
             IconButton(
               icon: Icon(Icons.chevron_right,
@@ -1140,7 +1146,6 @@ class _ShiftTimelineScreenState extends State<ShiftTimelineScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ヘッダー
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(12),
@@ -1154,14 +1159,11 @@ class _ShiftTimelineScreenState extends State<ShiftTimelineScreen> {
                     : '勤務時間帯：未設定',
                 style: TextStyle(
                   fontSize: 13,
-                  color:
-                      _isHoliday ? Colors.red[700] : Colors.blue[700],
+                  color: _isHoliday ? Colors.red[700] : Colors.blue[700],
                 ),
               ),
             ),
             const SizedBox(height: 16),
-
-            // 凡例
             Wrap(
               spacing: 12,
               children: [
@@ -1172,61 +1174,48 @@ class _ShiftTimelineScreenState extends State<ShiftTimelineScreen> {
               ],
             ),
             const SizedBox(height: 12),
-
-            // スタッフ配置
             const Text('スタッフ配置',
-                style: TextStyle(
-                    fontWeight: FontWeight.bold, fontSize: 14)),
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
             const Text('タップしてシフトを確定・編集',
                 style: TextStyle(fontSize: 11, color: Colors.grey)),
             const SizedBox(height: 8),
             _buildTimeHeader(startHour, endHour),
             const SizedBox(height: 4),
-
-            // 通常スタッフ
             ...widget.staff.map((m) {
-              final profile =
-                  m['user_profiles'] as Map<String, dynamic>;
-              final userId = profile['id'] as String;
-              final name = profile['name'] as String;
+              final profile = m['user_profiles'] as Map<String, dynamic>;
+              final userId  = profile['id']   as String;
+              final name    = profile['name'] as String;
               final confirmed = _getConfirmedShift(userId);
-              final request = _getRequestShift(userId);
-              final isDayOff = _isDayOff(userId);
+              final request   = _getRequestShift(userId);
+              final isDayOff  = _isDayOff(userId);
 
               return _buildStaffTimebar(
-                name: name,
+                name:           name,
                 confirmedShift: confirmed,
-                requestShift: request,
-                isDayOff: isDayOff,
-                startHour: startHour,
-                endHour: endHour,
+                requestShift:   request,
+                isDayOff:       isDayOff,
+                startHour:      startHour,
+                endHour:        endHour,
                 onTap: () => _showConfirmFromTimelineDialog(m),
               );
             }),
-
-            // 二重線区切り
             const SizedBox(height: 4),
             Container(
               height: 3,
               decoration: BoxDecoration(
                 border: Border(
                   top: BorderSide(color: Colors.grey[400]!, width: 1),
-                  bottom: BorderSide(
-                      color: Colors.grey[400]!, width: 1),
+                  bottom: BorderSide(color: Colors.grey[400]!, width: 1),
                 ),
               ),
             ),
             const SizedBox(height: 4),
-
-            // ヘルプ・タイミー行
             ..._tempShifts.map((shift) => _buildTempTimebar(
-                  shift: shift,
+                  shift:     shift,
                   startHour: startHour,
-                  endHour: endHour,
+                  endHour:   endHour,
                   onTap: () => _showEditTempDialog(shift),
                 )),
-
-            // ヘルプ追加ボタン
             Padding(
               padding: const EdgeInsets.only(top: 4, bottom: 20),
               child: GestureDetector(
@@ -1243,8 +1232,7 @@ class _ShiftTimelineScreenState extends State<ShiftTimelineScreen> {
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.add,
-                          size: 16, color: Colors.orange[700]),
+                      Icon(Icons.add, size: 16, color: Colors.orange[700]),
                       const SizedBox(width: 4),
                       Text(
                         'ヘルプ・タイミーを追加',
@@ -1259,8 +1247,6 @@ class _ShiftTimelineScreenState extends State<ShiftTimelineScreen> {
                 ),
               ),
             ),
-
-            // 時間帯別在籍数
             const Text('時間帯別在籍数',
                 style: TextStyle(
                     fontWeight: FontWeight.bold, fontSize: 14)),

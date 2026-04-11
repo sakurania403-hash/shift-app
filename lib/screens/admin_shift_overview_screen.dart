@@ -11,11 +11,13 @@ import 'shift_timeline_screen.dart';
 class AdminShiftOverviewScreen extends StatefulWidget {
   final Map<String, dynamic> recruitment;
   final String storeId;
+  final String storeName;
 
   const AdminShiftOverviewScreen({
     super.key,
     required this.recruitment,
     required this.storeId,
+    required this.storeName,
   });
 
   @override
@@ -503,26 +505,16 @@ class _AdminShiftOverviewScreenState
                                               Navigator.push(
                                                 context,
                                                 MaterialPageRoute(
-                                                  builder: (_) =>
-                                                      ShiftTimelineScreen(
-                                                    date: date,
-                                                    storeId:
-                                                        widget.storeId,
-                                                    confirmedShifts:
-                                                        _confirmedShifts
-                                                            .values
-                                                            .toList(),
-                                                    staff: _staff,
-                                                    shiftRequests:
-                                                        _shiftRequests
-                                                            .values
-                                                            .toList(),
-                                                    dayOffRequests:
-                                                        _dayOffRequests
-                                                            .values
-                                                            .toList(),
-                                                    allDates: dates,
-                                                  ),
+                                                  builder: (_) => ShiftTimelineScreen(
+  date: date,
+  storeId: widget.storeId,
+  storeName: widget.storeName,
+  confirmedShifts: _confirmedShifts.values.toList(),
+  staff: _staff,
+  shiftRequests: _shiftRequests.values.toList(),
+  dayOffRequests: _dayOffRequests.values.toList(),
+  allDates: dates,
+),
                                                 ),
                                               ).then(
                                                   (_) => _loadData());

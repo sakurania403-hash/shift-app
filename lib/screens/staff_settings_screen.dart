@@ -84,8 +84,6 @@ class StaffSettingsScreen extends StatefulWidget {
 
 class StaffSettingsScreenState extends State<StaffSettingsScreen> {
   String _email = '';
-
-  // storeId → 表示色（リロード後に更新）
   Map<String, Color> _colorMap = {};
 
   @override
@@ -108,7 +106,6 @@ class StaffSettingsScreenState extends State<StaffSettingsScreen> {
     }
   }
 
-  // ─── 外から呼べる色リロードメソッド ──────────────────────────
   Future<void> reloadColors() async {
     final userId = _supabase.auth.currentUser?.id;
     if (userId == null) return;
@@ -247,7 +244,6 @@ class StaffSettingsScreenState extends State<StaffSettingsScreen> {
             ),
           ),
         );
-        // 詳細画面から戻ったら色を再取得
         await reloadColors();
       },
     );
@@ -788,18 +784,22 @@ class _StoreDetailScreenState extends State<_StoreDetailScreen> {
             ),
           ),
           const Divider(height: 1, indent: 16),
-          _buildInputRow(
-            label: '平日終業',
+          // 平日終業（説明文付き）
+          _buildInputRowWithNote(
+            label:    '平日終業',
+            note:     '勤務時間のラストを指す。',
             controller: _weekdayCloseCtrl,
-            suffix: '',
+            suffix:   '',
             hintText: '22:00',
             onChanged: (v) => weekdayClose = v.trim(),
           ),
           const Divider(height: 1, indent: 16),
-          _buildInputRow(
-            label: '土日祝終業',
+          // 土日祝終業（説明文付き）
+          _buildInputRowWithNote(
+            label:    '土日祝終業',
+            note:     '勤務時間のラストを指す。',
             controller: _holidayCloseCtrl,
-            suffix: '',
+            suffix:   '',
             hintText: '22:00',
             onChanged: (v) => holidayClose = v.trim(),
           ),
@@ -849,6 +849,59 @@ class _StoreDetailScreenState extends State<_StoreDetailScreen> {
                   fontSize: 15, color: Colors.black87),
               onChanged: onChanged,
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 説明文付き入力行
+  Widget _buildInputRowWithNote({
+    required String label,
+    required String note,
+    required TextEditingController controller,
+    required String suffix,
+    String? hintText,
+    required Function(String) onChanged,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              SizedBox(
+                width: 90,
+                child: Text(label,
+                    style: const TextStyle(
+                        fontSize: 15, color: Colors.black87)),
+              ),
+              Expanded(
+                child: TextField(
+                  controller: controller,
+                  keyboardType: TextInputType.text,
+                  textAlign: TextAlign.right,
+                  decoration: InputDecoration(
+                    hintText: hintText,
+                    suffixText: suffix.isNotEmpty ? suffix : null,
+                    border: InputBorder.none,
+                    isDense: true,
+                    contentPadding:
+                        const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                  style: const TextStyle(
+                      fontSize: 15, color: Colors.black87),
+                  onChanged: onChanged,
+                ),
+              ),
+            ],
+          ),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Text(note,
+                style: const TextStyle(
+                    fontSize: 11, color: Colors.grey)),
           ),
         ],
       ),

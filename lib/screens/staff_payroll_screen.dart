@@ -55,12 +55,33 @@ Color _hexToColor(String hex) {
   return Color(int.parse('FF$h', radix: 16));
 }
 
+// ─── 給料内訳 ──────────────────────────────────────────────────
+class _WageBreakdown {
+  final int baseWage;       // 平日給料
+  final int holidayWage;    // 休日給料（休日時給設定あり時のみ）
+  final int lateNightWage;  // 深夜給料
+  final int commuteFee;     // 交通費
+  _WageBreakdown({
+    required this.baseWage,
+    required this.holidayWage,
+    required this.lateNightWage,
+    required this.commuteFee,
+  });
+  int get total => baseWage + holidayWage + lateNightWage + commuteFee;
+}
+
 // ─── データモデル ───────────────────────────────────────────────
 class _ShiftRecord {
   final DateTime date;
   final String startTime;
   final String endTime;
-  _ShiftRecord({required this.date, required this.startTime, required this.endTime});
+  final bool isHoliday;
+  _ShiftRecord({
+    required this.date,
+    required this.startTime,
+    required this.endTime,
+    required this.isHoliday,
+  });
 
   int get rawMinutes {
     final sMin = _toMin(startTime);
@@ -68,10 +89,27 @@ class _ShiftRecord {
     if (eMin <= sMin) eMin += 24 * 60;
     return eMin - sMin;
   }
+
   static int _toMin(String t) {
     final p = t.split(':');
     if (p.length < 2) return 0;
     return int.parse(p[0]) * 60 + int.parse(p[1]);
+  }
+
+  int lateNightMinutes(String lateStart, String lateEnd) {
+    if (lateStart.isEmpty || lateEnd.isEmpty) return 0;
+    final workS = _toMin(startTime);
+    var   workE = _toMin(endTime);
+    if (workE <= workS) workE += 24 * 60;
+
+    final lnS = _toMin(lateStart);
+    var   lnE = _toMin(lateEnd);
+    if (lnE <= lnS) lnE += 24 * 60;
+
+    final overlapS = workS > lnS ? workS : lnS;
+    final overlapE = workE < lnE ? workE : lnE;
+    if (overlapE <= overlapS) return 0;
+    return overlapE - overlapS;
   }
 }
 
@@ -91,13 +129,21 @@ class _StoreData {
   final String storeName;
   Color displayColor;
 
-  int          hourlyWage   = 0;
-  RoundingUnit roundingUnit = RoundingUnit.minute;
-  RoundingDir  roundingDir  = RoundingDir.truncate;
-  int          closingDay   = 0;
-  PaymentMonth paymentMonth = PaymentMonth.nextMonth;
-  String       weekdayClose = '22:00';
-  String       holidayClose = '22:00';
+  int          hourlyWage    = 0;
+  RoundingUnit roundingUnit  = RoundingUnit.minute;
+  RoundingDir  roundingDir   = RoundingDir.truncate;
+  int          closingDay    = 0;
+  PaymentMonth paymentMonth  = PaymentMonth.nextMonth;
+  String       weekdayClose  = '22:00';
+  String       holidayClose  = '22:00';
+
+  int       commuteFee      = 0;
+  int       holidayWageRate = 0;   // 0 = 未設定（基本時給を使う）
+  List<int> holidayWeekdays = [];
+  int       lateNightWage   = 0;
+  String    lateNightStart  = '22:00';
+  String    lateNightEnd    = '05:00';
+
   List<Map<String, dynamic>> breakRules = [];
 
   List<_ShiftRecord> shifts = [];
@@ -106,6 +152,8 @@ class _StoreData {
   int? actualPay;
   bool actualSaving = false;
   late TextEditingController actualCtrl;
+
+  bool breakdownExpanded = false;
 
   _StoreData({
     required this.storeId,
@@ -116,6 +164,9 @@ class _StoreData {
   }
 
   void dispose() => actualCtrl.dispose();
+
+  /// 休日時給が設定されているか（= 平日と異なる給料体系か）
+  bool get hasHolidayWageRate => holidayWageRate > 0;
 
   _PayPeriod calcPayPeriod(int year, int month) {
     int cy = year, cm = month;
@@ -168,12 +219,65 @@ class _StoreData {
     }
   }
 
-  int dailyWage(int i) => (hourlyWage * workedMinutes(i) / 60).floor();
+  /// 給料内訳を計算
+  /// ・休日時給未設定 → 休日も基本時給で計算。内訳は「基本給料」にまとめる
+  /// ・休日時給設定済 → 平日は基本時給、休日は休日時給で分けて表示
+  _WageBreakdown dailyBreakdown(int i) {
+    final shift = shifts[i];
+    final wMin  = workedMinutes(i);
+
+    int base    = 0;
+    int holiday = 0;
+
+    if (shift.isHoliday && hasHolidayWageRate) {
+      // 休日時給設定あり → 休日給料として計上
+      holiday = (holidayWageRate * wMin / 60).floor();
+    } else {
+      // 休日時給未設定 or 平日 → 基本時給で計算
+      base = (hourlyWage * wMin / 60).floor();
+    }
+
+    // 深夜給料
+    int lateNight = 0;
+    if (lateNightWage > 0 && lateNightStart.isNotEmpty && lateNightEnd.isNotEmpty) {
+      final lnMin = shift.lateNightMinutes(lateNightStart, lateNightEnd);
+      lateNight = (lateNightWage * lnMin / 60).floor();
+    }
+
+    return _WageBreakdown(
+      baseWage:      base,
+      holidayWage:   holiday,
+      lateNightWage: lateNight,
+      commuteFee:    commuteFee,
+    );
+  }
 
   int get totalMinutes =>
       List.generate(shifts.length, (i) => workedMinutes(i)).fold(0, (a, b) => a + b);
-  int get totalWage =>
-      List.generate(shifts.length, (i) => dailyWage(i)).fold(0, (a, b) => a + b);
+
+  int get totalWage {
+    int total = 0;
+    for (var i = 0; i < shifts.length; i++) {
+      total += dailyBreakdown(i).total;
+    }
+    return total;
+  }
+
+  // 基本給料の集計（平日 + 休日時給未設定の休日）
+  int get totalBaseMinutes => List.generate(shifts.length, (i) {
+    if (shifts[i].isHoliday && hasHolidayWageRate) return 0;
+    return workedMinutes(i);
+  }).fold(0, (a, b) => a + b);
+  int get totalBaseWage    => List.generate(shifts.length, (i) => dailyBreakdown(i).baseWage).fold(0, (a, b) => a + b);
+
+  // 休日給料の集計（休日時給設定あり時のみ）
+  int get holidayMinutes   => List.generate(shifts.length, (i) => (shifts[i].isHoliday && hasHolidayWageRate) ? workedMinutes(i) : 0).fold(0, (a, b) => a + b);
+  int get totalHolidayWage => List.generate(shifts.length, (i) => dailyBreakdown(i).holidayWage).fold(0, (a, b) => a + b);
+
+  // 深夜・交通費
+  int get totalLateNightMinutes => shifts.fold(0, (a, s) => a + s.lateNightMinutes(lateNightStart, lateNightEnd));
+  int get totalLateNight        => List.generate(shifts.length, (i) => dailyBreakdown(i).lateNightWage).fold(0, (a, b) => a + b);
+  int get totalCommute          => List.generate(shifts.length, (i) => dailyBreakdown(i).commuteFee).fold(0, (a, b) => a + b);
 }
 
 // ─── メイン画面 ────────────────────────────────────────────────
@@ -214,7 +318,31 @@ class StaffPayrollScreenState extends State<StaffPayrollScreen> {
     return Map<String, dynamic>.from(v as Map);
   }
 
-  // ─── 外から呼べる色リロードメソッド ──────────────────────────
+  List<int> _parseHolidayWeekdays(dynamic raw) {
+    if (raw == null) return [];
+    const jpMap = {
+      '日': 0, '月': 1, '火': 2, '水': 3, '木': 4, '金': 5, '土': 6,
+    };
+    List<dynamic> items = [];
+    if (raw is List) {
+      items = raw;
+    } else if (raw is String && raw.isNotEmpty) {
+      final cleaned = raw.replaceAll(RegExp(r'[\[\]\s""]'), '');
+      items = cleaned.split(',').where((s) => s.isNotEmpty).toList();
+    }
+    final result = <int>[];
+    for (final item in items) {
+      final s = item.toString().trim();
+      if (jpMap.containsKey(s)) {
+        result.add(jpMap[s]!);
+      } else {
+        final n = int.tryParse(s);
+        if (n != null && n >= 0 && n <= 6) result.add(n);
+      }
+    }
+    return result;
+  }
+
   Future<void> reloadColors() async {
     final userId = _supabase.auth.currentUser?.id;
     if (userId == null) return;
@@ -225,7 +353,6 @@ class StaffPayrollScreenState extends State<StaffPayrollScreen> {
           .select('store_id, display_color')
           .eq('user_id', userId)
           .inFilter('store_id', storeIds);
-
       if (mounted) {
         setState(() {
           for (var i = 0; i < _storeData.length; i++) {
@@ -247,7 +374,6 @@ class StaffPayrollScreenState extends State<StaffPayrollScreen> {
     }
   }
 
-  // ─── 初期化 ──────────────────────────────────────────────────
   Future<void> _init() async {
     List<Map<String, dynamic>> storeList = [];
     if (widget.stores != null && widget.stores!.isNotEmpty) {
@@ -257,10 +383,7 @@ class StaffPayrollScreenState extends State<StaffPayrollScreen> {
     }
 
     final userId = _supabase.auth.currentUser?.id;
-
-    // 設定一括取得
     Map<String, Map<String, dynamic>> savedSettings = {};
-    // 表示色一括取得
     Map<String, String?> colorMap = {};
 
     if (userId != null && storeList.isNotEmpty) {
@@ -300,7 +423,6 @@ class StaffPayrollScreenState extends State<StaffPayrollScreen> {
       final name    = store['name'] as String? ?? '';
       final saved   = savedSettings[storeId];
 
-      // 表示色の解決
       Color resolvedColor;
       final hex = colorMap[storeId];
       if (hex != null && hex.isNotEmpty) {
@@ -314,13 +436,19 @@ class StaffPayrollScreenState extends State<StaffPayrollScreen> {
         storeName:    name,
         displayColor: resolvedColor,
       );
-      d.hourlyWage   = saved?['hourly_wage']   as int?    ?? 0;
-      d.closingDay   = saved?['closing_day']   as int?    ?? 0;
-      d.paymentMonth = PaymentMonth.values[saved?['payment_month'] as int? ?? 1];
-      d.roundingUnit = RoundingUnit.values[saved?['rounding_unit'] as int? ?? 0];
-      d.roundingDir  = RoundingDir.values[saved?['rounding_dir']   as int? ?? 0];
-      d.weekdayClose = saved?['weekday_close'] as String? ?? '22:00';
-      d.holidayClose = saved?['holiday_close'] as String? ?? '22:00';
+      d.hourlyWage      = saved?['hourly_wage']      as int?    ?? 0;
+      d.closingDay      = saved?['closing_day']      as int?    ?? 0;
+      d.paymentMonth    = PaymentMonth.values[saved?['payment_month'] as int? ?? 1];
+      d.roundingUnit    = RoundingUnit.values[saved?['rounding_unit'] as int? ?? 0];
+      d.roundingDir     = RoundingDir.values[saved?['rounding_dir']   as int? ?? 0];
+      d.weekdayClose    = saved?['weekday_close']    as String? ?? '22:00';
+      d.holidayClose    = saved?['holiday_close']    as String? ?? '22:00';
+      d.commuteFee      = saved?['commute_fee']      as int?    ?? 0;
+      d.holidayWageRate = saved?['holiday_wage']     as int?    ?? 0;
+      d.holidayWeekdays = _parseHolidayWeekdays(saved?['holiday_weekdays']);
+      d.lateNightWage   = saved?['late_night_wage']  as int?    ?? 0;
+      d.lateNightStart  = saved?['late_night_start'] as String? ?? '22:00';
+      d.lateNightEnd    = saved?['late_night_end']   as String? ?? '05:00';
 
       try { d.breakRules = await _settingsService.getBreakRules(storeId); } catch (_) {}
       dataList.add(d);
@@ -339,7 +467,6 @@ class StaffPayrollScreenState extends State<StaffPayrollScreen> {
     ]);
   }
 
-  // ─── シフト取得 ──────────────────────────────────────────────
   Future<void> _loadShifts(_StoreData d) async {
     final userId = _supabase.auth.currentUser?.id;
     if (userId == null) return;
@@ -363,22 +490,26 @@ class StaffPayrollScreenState extends State<StaffPayrollScreen> {
         final startRaw = mm['start_time'] as String?;
         final endRaw   = mm['end_time']   as String?;
         final start    = startRaw != null ? startRaw.substring(0, 5) : '09:00';
-        var   end      = endRaw   != null ? endRaw.substring(0, 5)   : '00:00';
-        if (end.startsWith('00:00')) {
-          final isHol = await StoreSettingsService.isHoliday(date, holidays);
-          final close = isHol ? d.holidayClose : d.weekdayClose;
-          if (close.isNotEmpty) end = close;
-        }
-        records.add(_ShiftRecord(date: date, startTime: start, endTime: end));
+        final end      = endRaw   != null ? endRaw.substring(0, 5)   : '00:00';
+
+        final isJpHol   = StoreSettingsService.isHoliday(date, holidays);
+        final isHoliday = isJpHol || d.holidayWeekdays.contains(date.weekday % 7);
+
+        records.add(_ShiftRecord(
+          date:      date,
+          startTime: start,
+          endTime:   end,
+          isHoliday: isHoliday,
+        ));
       }
       if (mounted) setState(() => d.shifts = records);
-    } catch (_) {
+    } catch (e) {
+      debugPrint('_loadShifts error: $e');
     } finally {
       if (mounted) setState(() => d.shiftsLoading = false);
     }
   }
 
-  // ─── 給料実績取得 ────────────────────────────────────────────
   Future<void> _loadActuals() async {
     final userId = _supabase.auth.currentUser?.id;
     if (userId == null) return;
@@ -396,7 +527,7 @@ class StaffPayrollScreenState extends State<StaffPayrollScreen> {
         final d = _storeData.where((d) => d.storeId == storeId).firstOrNull;
         if (d != null && mounted) {
           setState(() {
-            d.actualPay  = pay;
+            d.actualPay       = pay;
             d.actualCtrl.text = pay != null ? pay.toString() : '';
           });
         }
@@ -404,7 +535,6 @@ class StaffPayrollScreenState extends State<StaffPayrollScreen> {
     } catch (_) {}
   }
 
-  // ─── 給料実績保存 ────────────────────────────────────────────
   Future<void> _saveActual(_StoreData d, String value) async {
     final userId = _supabase.auth.currentUser?.id;
     if (userId == null) return;
@@ -445,13 +575,19 @@ class StaffPayrollScreenState extends State<StaffPayrollScreen> {
         final d = _storeData.where((d) => d.storeId == storeId).firstOrNull;
         if (d != null) {
           setState(() {
-            d.hourlyWage   = m['hourly_wage']   as int?    ?? 0;
-            d.closingDay   = m['closing_day']   as int?    ?? 0;
-            d.paymentMonth = PaymentMonth.values[m['payment_month'] as int? ?? 1];
-            d.roundingUnit = RoundingUnit.values[m['rounding_unit'] as int? ?? 0];
-            d.roundingDir  = RoundingDir.values[m['rounding_dir']   as int? ?? 0];
-            d.weekdayClose = m['weekday_close'] as String? ?? '22:00';
-            d.holidayClose = m['holiday_close'] as String? ?? '22:00';
+            d.hourlyWage      = m['hourly_wage']      as int?    ?? 0;
+            d.closingDay      = m['closing_day']      as int?    ?? 0;
+            d.paymentMonth    = PaymentMonth.values[m['payment_month'] as int? ?? 1];
+            d.roundingUnit    = RoundingUnit.values[m['rounding_unit'] as int? ?? 0];
+            d.roundingDir     = RoundingDir.values[m['rounding_dir']   as int? ?? 0];
+            d.weekdayClose    = m['weekday_close']    as String? ?? '22:00';
+            d.holidayClose    = m['holiday_close']    as String? ?? '22:00';
+            d.commuteFee      = m['commute_fee']      as int?    ?? 0;
+            d.holidayWageRate = m['holiday_wage']     as int?    ?? 0;
+            d.holidayWeekdays = _parseHolidayWeekdays(m['holiday_weekdays']);
+            d.lateNightWage   = m['late_night_wage']  as int?    ?? 0;
+            d.lateNightStart  = m['late_night_start'] as String? ?? '22:00';
+            d.lateNightEnd    = m['late_night_end']   as String? ?? '05:00';
           });
         }
       }
@@ -462,7 +598,6 @@ class StaffPayrollScreenState extends State<StaffPayrollScreen> {
     ]);
   }
 
-  // ─── UI ─────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -495,9 +630,9 @@ class StaffPayrollScreenState extends State<StaffPayrollScreen> {
   }
 
   Widget _buildBody() {
-    final totalMin  = _storeData.fold(0, (a, d) => a + d.totalMinutes);
-    final totalEst  = _storeData.fold(0, (a, d) => a + d.totalWage);
-    final totalAct  = _storeData.every((d) => d.actualPay != null)
+    final totalMin    = _storeData.fold(0, (a, d) => a + d.totalMinutes);
+    final totalEst    = _storeData.fold(0, (a, d) => a + d.totalWage);
+    final totalAct    = _storeData.every((d) => d.actualPay != null)
         ? _storeData.fold(0, (a, d) => a + (d.actualPay ?? 0))
         : null;
     final allHaveWage = _storeData.every((d) => d.hourlyWage > 0);
@@ -507,7 +642,6 @@ class StaffPayrollScreenState extends State<StaffPayrollScreen> {
     return ListView(
       padding: const EdgeInsets.all(12),
       children: [
-        // 合計サマリーカード
         Container(
           margin: const EdgeInsets.only(bottom: 16),
           decoration: BoxDecoration(
@@ -530,8 +664,7 @@ class StaffPayrollScreenState extends State<StaffPayrollScreen> {
                   const Icon(Icons.functions, color: Colors.white70, size: 14),
                   const SizedBox(width: 6),
                   Text('$_year年$_month月払い 合計',
-                      style: const TextStyle(
-                          color: Colors.white70, fontSize: 12)),
+                      style: const TextStyle(color: Colors.white70, fontSize: 12)),
                 ],
               ),
               const SizedBox(height: 12),
@@ -541,8 +674,7 @@ class StaffPayrollScreenState extends State<StaffPayrollScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text('総勤務時間',
-                          style: TextStyle(
-                              color: Colors.white60, fontSize: 11)),
+                          style: TextStyle(color: Colors.white60, fontSize: 11)),
                       const SizedBox(height: 4),
                       Text('${h}時間${m}分',
                           style: const TextStyle(
@@ -556,14 +688,12 @@ class StaffPayrollScreenState extends State<StaffPayrollScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text('概算給与',
-                          style: TextStyle(
-                              color: Colors.white60, fontSize: 11)),
+                          style: TextStyle(color: Colors.white60, fontSize: 11)),
                       const SizedBox(height: 4),
                       Text(
                         allHaveWage ? '¥${_fmt(totalEst)}' : '—',
                         style: TextStyle(
-                          color: allHaveWage
-                              ? Colors.white : Colors.white38,
+                          color: allHaveWage ? Colors.white : Colors.white38,
                           fontSize: allHaveWage ? 22 : 14,
                           fontWeight: FontWeight.bold,
                         ),
@@ -576,14 +706,12 @@ class StaffPayrollScreenState extends State<StaffPayrollScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text('実績合計',
-                          style: TextStyle(
-                              color: Colors.white60, fontSize: 11)),
+                          style: TextStyle(color: Colors.white60, fontSize: 11)),
                       const SizedBox(height: 4),
                       Text(
                         totalAct != null ? '¥${_fmt(totalAct)}' : '—',
                         style: TextStyle(
-                          color: totalAct != null
-                              ? Colors.white : Colors.white38,
+                          color: totalAct != null ? Colors.white : Colors.white38,
                           fontSize: totalAct != null ? 22 : 14,
                           fontWeight: FontWeight.bold,
                         ),
@@ -596,154 +724,328 @@ class StaffPayrollScreenState extends State<StaffPayrollScreen> {
           ),
         ),
 
-        ...(_storeData.map((d) => _buildStoreRow(d))),
+        ...(_storeData.map((d) => _buildStoreCard(d))),
         const SizedBox(height: 24),
       ],
     );
   }
 
-  // ─── 店舗行 ──────────────────────────────────────────────────
-  Widget _buildStoreRow(_StoreData d) {
+  Widget _buildStoreCard(_StoreData d) {
     final period  = d.calcPayPeriod(_year, _month);
     final h       = d.totalMinutes ~/ 60;
     final m       = d.totalMinutes % 60;
     final hasWage = d.hourlyWage > 0;
 
+    final hasBase      = d.totalBaseWage > 0;
+    final hasHoliday   = d.totalHolidayWage > 0;
+    final hasLateNight = d.totalLateNight > 0;
+    final hasCommute   = d.totalCommute > 0;
+    final hasBreakdown = hasWage && (hasBase || hasHoliday || hasLateNight || hasCommute);
+
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       elevation: 1,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            // 店舗名（色付き四角 + 黒字店名）
-            Expanded(
-              flex: 3,
-              child: Row(
-                children: [
-                  // 選択した色の四角
-                  Container(
-                    width: 14, height: 14,
-                    decoration: BoxDecoration(
-                      color: d.displayColor,
-                      borderRadius: BorderRadius.circular(3),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(d.storeName,
-                            style: const TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.black87)),
-                        Text(period.label,
-                            style: const TextStyle(
-                                fontSize: 10, color: Colors.grey)),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            // 勤務時間
-            Expanded(
-              flex: 2,
-              child: d.shiftsLoading
-                  ? const SizedBox(
-                      width: 16, height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2))
-                  : Column(
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        const Text('勤務時間',
-                            style: TextStyle(
-                                fontSize: 10, color: Colors.grey)),
-                        const SizedBox(height: 2),
-                        Text(
-                          d.shifts.isEmpty ? '--' : '${h}h${m}m',
-                          style: const TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.bold),
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(
+                  flex: 3,
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 14, height: 14,
+                        decoration: BoxDecoration(
+                          color: d.displayColor,
+                          borderRadius: BorderRadius.circular(3),
                         ),
-                      ],
-                    ),
-            ),
-            // 給料見込
-            Expanded(
-              flex: 2,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  const Text('給料見込',
-                      style: TextStyle(fontSize: 10, color: Colors.grey)),
-                  const SizedBox(height: 2),
-                  Text(
-                    !hasWage ? '未設定' : '¥${_fmt(d.totalWage)}',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.bold,
-                      color: hasWage ? Colors.black87 : Colors.orange,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            // 給料実績
-            Expanded(
-              flex: 3,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  const Text('給料実績',
-                      style: TextStyle(fontSize: 10, color: Colors.grey)),
-                  const SizedBox(height: 2),
-                  SizedBox(
-                    height: 32,
-                    child: TextField(
-                      controller: d.actualCtrl,
-                      keyboardType: TextInputType.number,
-                      inputFormatters: [
-                        FilteringTextInputFormatter.digitsOnly
-                      ],
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(fontSize: 13),
-                      decoration: InputDecoration(
-                        hintText: '未入力',
-                        hintStyle: const TextStyle(
-                            fontSize: 12, color: Colors.grey),
-                        isDense: true,
-                        prefixText:
-                            d.actualCtrl.text.isNotEmpty ? '¥' : null,
-                        contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 6),
-                        border: const OutlineInputBorder(),
-                        suffixIcon: d.actualSaving
-                            ? const SizedBox(
-                                width: 14, height: 14,
-                                child: CircularProgressIndicator(
-                                    strokeWidth: 2))
-                            : null,
                       ),
-                      onSubmitted: (v) => _saveActual(d, v),
-                      onTapOutside: (_) =>
-                          _saveActual(d, d.actualCtrl.text),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(d.storeName,
+                                style: const TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.black87)),
+                            Text(period.label,
+                                style: const TextStyle(
+                                    fontSize: 10, color: Colors.grey)),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  flex: 2,
+                  child: d.shiftsLoading
+                      ? const SizedBox(
+                          width: 16, height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2))
+                      : Column(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            const Text('勤務時間',
+                                style: TextStyle(fontSize: 10, color: Colors.grey)),
+                            const SizedBox(height: 2),
+                            Text(
+                              d.shifts.isEmpty ? '--' : '${h}h${m}m',
+                              style: const TextStyle(
+                                  fontSize: 13, fontWeight: FontWeight.bold),
+                            ),
+                          ],
+                        ),
+                ),
+                Expanded(
+                  flex: 2,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      const Text('給料見込',
+                          style: TextStyle(fontSize: 10, color: Colors.grey)),
+                      const SizedBox(height: 2),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            !hasWage ? '未設定' : '¥${_fmt(d.totalWage)}',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold,
+                              color: hasWage ? Colors.black87 : Colors.orange,
+                            ),
+                          ),
+                          if (hasBreakdown) ...[
+                            const SizedBox(width: 2),
+                            GestureDetector(
+                              onTap: () => setState(
+                                  () => d.breakdownExpanded = !d.breakdownExpanded),
+                              child: Icon(
+                                d.breakdownExpanded
+                                    ? Icons.expand_less
+                                    : Icons.expand_more,
+                                size: 16,
+                                color: Colors.grey,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  flex: 3,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      const Text('給料実績',
+                          style: TextStyle(fontSize: 10, color: Colors.grey)),
+                      const SizedBox(height: 2),
+                      SizedBox(
+                        height: 32,
+                        child: TextField(
+                          controller: d.actualCtrl,
+                          keyboardType: TextInputType.number,
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly
+                          ],
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(fontSize: 13),
+                          decoration: InputDecoration(
+                            hintText: '未入力',
+                            hintStyle: const TextStyle(
+                                fontSize: 12, color: Colors.grey),
+                            isDense: true,
+                            prefixText:
+                                d.actualCtrl.text.isNotEmpty ? '¥' : null,
+                            contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 6),
+                            border: const OutlineInputBorder(),
+                            suffixIcon: d.actualSaving
+                                ? const SizedBox(
+                                    width: 14, height: 14,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2))
+                                : null,
+                          ),
+                          onSubmitted: (v) => _saveActual(d, v),
+                          onTapOutside: (_) =>
+                              _saveActual(d, d.actualCtrl.text),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          if (hasBreakdown && d.breakdownExpanded)
+            Container(
+              decoration: BoxDecoration(
+                color: Colors.grey.shade50,
+                borderRadius: const BorderRadius.only(
+                  bottomLeft:  Radius.circular(10),
+                  bottomRight: Radius.circular(10),
+                ),
+              ),
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+              child: Column(
+                children: [
+                  const Divider(height: 1),
+                  const SizedBox(height: 8),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Row(
+                      children: const [
+                        Expanded(flex: 3, child: Text('項目',
+                            style: TextStyle(fontSize: 10, color: Colors.grey))),
+                        Expanded(flex: 3, child: Text('時給/金額',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(fontSize: 10, color: Colors.grey))),
+                        Expanded(flex: 3, child: Text('時間/日数',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(fontSize: 10, color: Colors.grey))),
+                        Expanded(flex: 2, child: Text('小計',
+                            textAlign: TextAlign.right,
+                            style: TextStyle(fontSize: 10, color: Colors.grey))),
+                      ],
                     ),
+                  ),
+                  const Divider(height: 1),
+                  const SizedBox(height: 4),
+
+                  // 基本給料（平日 + 休日時給未設定の休日をまとめて表示）
+                  if (hasBase)
+                    _breakdownDetailRow(
+                      label:    '基本給料',
+                      wage:     d.hourlyWage,
+                      duration: _fmtMin(d.totalBaseMinutes),
+                      amount:   d.totalBaseWage,
+                      color:    d.displayColor,
+                    ),
+
+                  // 休日給料（休日時給設定あり時のみ表示）
+                  if (hasHoliday)
+                    _breakdownDetailRow(
+                      label:    '休日給料',
+                      wage:     d.holidayWageRate,
+                      duration: _fmtMin(d.holidayMinutes),
+                      amount:   d.totalHolidayWage,
+                      color:    Colors.orange,
+                    ),
+
+                  if (hasLateNight)
+                    _breakdownDetailRow(
+                      label:    '深夜給料',
+                      wage:     d.lateNightWage,
+                      duration: _fmtMin(d.totalLateNightMinutes),
+                      amount:   d.totalLateNight,
+                      color:    Colors.indigo,
+                    ),
+
+                  if (hasCommute)
+                    _breakdownDetailRow(
+                      label:    '交通費',
+                      wage:     d.commuteFee,
+                      duration: '${d.shifts.length}日',
+                      amount:   d.totalCommute,
+                      color:    Colors.teal,
+                    ),
+
+                  const Divider(height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      const Text('合計',
+                          style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.black87)),
+                      const SizedBox(width: 12),
+                      Text('¥${_fmt(d.totalWage)}',
+                          style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.black87)),
+                    ],
                   ),
                 ],
               ),
             ),
-          ],
-        ),
+        ],
       ),
     );
   }
 
-  // ─── 月選択 ──────────────────────────────────────────────────
+  Widget _breakdownDetailRow({
+    required String label,
+    required int    wage,
+    required String duration,
+    required int    amount,
+    required Color  color,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Expanded(
+            flex: 3,
+            child: Row(
+              children: [
+                Container(
+                  width: 7, height: 7,
+                  decoration: BoxDecoration(
+                    color: color.withOpacity(0.8),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Text(label,
+                    style: const TextStyle(
+                        fontSize: 12, color: Colors.black87)),
+              ],
+            ),
+          ),
+          Expanded(
+            flex: 3,
+            child: Text('¥${_fmt(wage)}',
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 12, color: Colors.black54)),
+          ),
+          Expanded(
+            flex: 3,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Text('×  ', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                Text(duration,
+                    style: const TextStyle(fontSize: 12, color: Colors.black54)),
+              ],
+            ),
+          ),
+          Expanded(
+            flex: 2,
+            child: Text('¥${_fmt(amount)}',
+                textAlign: TextAlign.right,
+                style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.black87)),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildMonthSelector() {
     return Container(
       color: const Color(0xFFE8F4F3),
@@ -783,4 +1085,10 @@ class StaffPayrollScreenState extends State<StaffPayrollScreen> {
 
   String _fmt(int v) => v.toString().replaceAllMapped(
       RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},');
+
+  String _fmtMin(int totalMin) {
+    final h = totalMin ~/ 60;
+    final m = totalMin % 60;
+    return '${h}h${m.toString().padLeft(2, '0')}m';
+  }
 }

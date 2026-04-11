@@ -27,12 +27,10 @@ class StoreSettingsService {
     return {};
   }
 
-  // 指定日が休日かどうか判定（土日・祝日）
-  static Future<bool> isHoliday(
-      DateTime date, Map<String, String> holidays) async {
+  // 指定日が休日かどうか判定（土日・祝日）← async削除・同期化
+  static bool isHoliday(DateTime date, Map<String, String> holidays) {
     final weekday = date.weekday;
-    if (weekday == DateTime.saturday ||
-        weekday == DateTime.sunday) {
+    if (weekday == DateTime.saturday || weekday == DateTime.sunday) {
       return true;
     }
     final dateStr = date.toIso8601String().substring(0, 10);

@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/shift_request_service.dart';
 import '../services/store_settings_service.dart';
+import '../services/notification_service.dart';
+import '../services/member_service.dart';
 
 class ShiftRequestScreen extends StatefulWidget {
   final Map<String, dynamic> recruitment;
@@ -20,17 +23,19 @@ class ShiftRequestScreen extends StatefulWidget {
 }
 
 class _ShiftRequestScreenState extends State<ShiftRequestScreen> {
-  final _service = ShiftRequestService();
-  final _settingsService = StoreSettingsService();
+  final _service             = ShiftRequestService();
+  final _settingsService     = StoreSettingsService();
+  final _notificationService = NotificationService();
+  final _memberService       = MemberService();
 
-  Map<String, dynamic> _shiftRequests = {};
+  Map<String, dynamic> _shiftRequests  = {};
   Map<String, dynamic> _dayOffRequests = {};
-  Set<String> _holidayDates = {};
+  Set<String> _holidayDates            = {};
   List<Map<String, dynamic>> _specialPeriods = [];
-  Map<String, String> _japaneseHolidays = {};
+  Map<String, String> _japaneseHolidays      = {};
 
-  bool _isLoading = true;
-  bool _isSubmitted = false;
+  bool _isLoading    = true;
+  bool _isSubmitted  = false;
   bool _isSubmitting = false;
   late DateTime _workStart;
   late DateTime _workEnd;
@@ -39,8 +44,8 @@ class _ShiftRequestScreenState extends State<ShiftRequestScreen> {
   @override
   void initState() {
     super.initState();
-    _workStart = DateTime.parse(widget.recruitment['work_start']);
-    _workEnd = DateTime.parse(widget.recruitment['work_end']);
+    _workStart    = DateTime.parse(widget.recruitment['work_start']);
+    _workEnd      = DateTime.parse(widget.recruitment['work_end']);
     _currentMonth = DateTime(_workStart.year, _workStart.month, 1);
     _loadRequests();
   }
@@ -69,13 +74,13 @@ class _ShiftRequestScreenState extends State<ShiftRequestScreen> {
           await StoreSettingsService.getJapaneseHolidays();
 
       setState(() {
-        _shiftRequests = {for (var s in shifts) s['date']: s};
+        _shiftRequests  = {for (var s in shifts) s['date']: s};
         _dayOffRequests = {for (var d in dayOffs) d['date']: d};
-        _isSubmitted = isSubmitted;
-        _holidayDates = holidays.map((h) => h['date'] as String).toSet();
+        _isSubmitted    = isSubmitted;
+        _holidayDates   = holidays.map((h) => h['date'] as String).toSet();
         _specialPeriods = specialPeriods;
         _japaneseHolidays = japaneseHolidays;
-        _isLoading = false;
+        _isLoading      = false;
       });
     } catch (e) {
       setState(() => _isLoading = false);
@@ -86,7 +91,7 @@ class _ShiftRequestScreenState extends State<ShiftRequestScreen> {
     final d = DateTime(date.year, date.month, date.day);
     for (final p in _specialPeriods) {
       final start = DateTime.parse(p['start_date'] as String);
-      final end = DateTime.parse(p['end_date'] as String);
+      final end   = DateTime.parse(p['end_date']   as String);
       if (!d.isBefore(start) && !d.isAfter(end)) return true;
     }
     return false;
@@ -127,12 +132,50 @@ class _ShiftRequestScreenState extends State<ShiftRequestScreen> {
     setState(() => _isSubmitting = true);
     try {
       await _service.submitShiftRequests(
-        storeId: widget.storeId,
+        storeId:       widget.storeId,
         recruitmentId: widget.recruitment['id'],
-        from: _workStart,
-        to: _workEnd,
+        from:          _workStart,
+        to:            _workEnd,
       );
       setState(() => _isSubmitted = true);
+
+      // ── 希望シフト提出通知：店舗の管理者へ送信 ──
+      try {
+        final members = await _memberService.getMembers(widget.storeId);
+        final adminIds = members
+            .where((m) => m['role'] == 'admin')
+            .map((m) => m['user_id'] as String)
+            .toList();
+
+        // 自分の名前を取得（store_memberships の display_name か user_profiles から）
+        final currentUserId = Supabase.instance.client.auth.currentUser?.id;
+        final myProfile = members.firstWhere(
+          (m) => m['user_id'] == currentUserId,
+          orElse: () => {},
+        );
+        final staffName = myProfile.isEmpty
+            ? 'スタッフ'
+            : (Map<String, dynamic>.from(
+                    myProfile['user_profiles'] as Map? ?? {}))['name']
+                    as String? ?? 'スタッフ';
+
+        final periodLabel =
+            '${DateFormat('M/d').format(_workStart)}〜${DateFormat('M/d').format(_workEnd)}';
+
+        for (final adminId in adminIds) {
+          await _notificationService.sendShiftRequestSubmitted(
+            storeId:         widget.storeId,
+            recipientUserId: adminId,
+            staffName:       staffName,
+            storeName:       widget.storeName,
+            periodLabel:     periodLabel,
+            recruitmentId:   widget.recruitment['id'],
+          );
+        }
+      } catch (_) {
+        // 通知失敗はサイレントに無視
+      }
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -155,7 +198,7 @@ class _ShiftRequestScreenState extends State<ShiftRequestScreen> {
   bool _isInRange(DateTime date) {
     final d = DateTime(date.year, date.month, date.day);
     final s = DateTime(_workStart.year, _workStart.month, _workStart.day);
-    final e = DateTime(_workEnd.year, _workEnd.month, _workEnd.day);
+    final e = DateTime(_workEnd.year,   _workEnd.month,   _workEnd.day);
     return !d.isBefore(s) && !d.isAfter(e);
   }
 
@@ -171,14 +214,9 @@ class _ShiftRequestScreenState extends State<ShiftRequestScreen> {
             : 'none';
     bool isLast = existing?['is_last'] ?? false;
     final startController = TextEditingController(
-        text: existing?['preferred_start']
-                ?.toString()
-                .substring(0, 5) ??
-            '');
+        text: existing?['preferred_start']?.toString().substring(0, 5) ?? '');
     final endController = TextEditingController(
-        text:
-            existing?['preferred_end']?.toString().substring(0, 5) ??
-                '');
+        text: existing?['preferred_end']?.toString().substring(0, 5) ?? '');
     final noteController =
         TextEditingController(text: existing?['note'] ?? '');
     final fmt = DateFormat('M/d(E)', 'ja');
@@ -276,38 +314,33 @@ class _ShiftRequestScreenState extends State<ShiftRequestScreen> {
                 if (selectedType == 'none') {
                   await _service.deleteShiftRequest(
                     storeId: widget.storeId,
-                    date: date,
+                    date:    date,
                   );
                 } else if (selectedType == 'off') {
                   await _service.saveShiftRequest(
-                    storeId: widget.storeId,
-                    recruitmentId: widget.recruitment['id'],
-                    date: date,
-                    isDayOff: true,
-                    // ── 修正ポイント ──
-                    // 提出済みの場合は保存と同時に submitted にする
+                    storeId:          widget.storeId,
+                    recruitmentId:    widget.recruitment['id'],
+                    date:             date,
+                    isDayOff:         true,
                     alreadySubmitted: _isSubmitted,
                   );
                 } else {
                   await _service.saveShiftRequest(
-                    storeId: widget.storeId,
-                    recruitmentId: widget.recruitment['id'],
-                    date: date,
-                    preferredStart:
-                        startController.text.trim().isEmpty
-                            ? null
-                            : startController.text.trim(),
+                    storeId:          widget.storeId,
+                    recruitmentId:    widget.recruitment['id'],
+                    date:             date,
+                    preferredStart:   startController.text.trim().isEmpty
+                        ? null
+                        : startController.text.trim(),
                     preferredEnd: isLast
                         ? null
                         : endController.text.trim().isEmpty
                             ? null
                             : endController.text.trim(),
-                    isLast: isLast,
-                    note: noteController.text.trim().isEmpty
+                    isLast:           isLast,
+                    note:             noteController.text.trim().isEmpty
                         ? null
                         : noteController.text.trim(),
-                    // ── 修正ポイント ──
-                    // 提出済みの場合は保存と同時に submitted にする
                     alreadySubmitted: _isSubmitted,
                   );
                 }
@@ -327,14 +360,14 @@ class _ShiftRequestScreenState extends State<ShiftRequestScreen> {
   }
 
   Widget _buildCalendar() {
-    final year = _currentMonth.year;
-    final month = _currentMonth.month;
-    final firstDay = DateTime(year, month, 1);
-    final lastDay = DateTime(year, month + 1, 0);
+    final year         = _currentMonth.year;
+    final month        = _currentMonth.month;
+    final firstDay     = DateTime(year, month, 1);
+    final lastDay      = DateTime(year, month + 1, 0);
     final startWeekday = firstDay.weekday % 7;
-    final totalCells = startWeekday + lastDay.day;
-    final totalRows = (totalCells / 7).ceil();
-    final isOpen = widget.recruitment['status'] == 'open';
+    final totalCells   = startWeekday + lastDay.day;
+    final totalRows    = (totalCells / 7).ceil();
+    final isOpen       = widget.recruitment['status'] == 'open';
 
     return Column(
       children: [
@@ -379,18 +412,14 @@ class _ShiftRequestScreenState extends State<ShiftRequestScreen> {
                 );
               }
 
-              final date = DateTime(year, month, dayNum);
-              final dateStr =
-                  date.toIso8601String().substring(0, 10);
-              final inRange = _isInRange(date);
-              final isStoreHoliday =
-                  _holidayDates.contains(dateStr);
-              final isSpecial = _isSpecialPeriod(date);
-              final isJpHoliday = _isJapaneseHoliday(date);
-              final isDayOff =
-                  _dayOffRequests.containsKey(dateStr);
-              final hasShift =
-                  _shiftRequests.containsKey(dateStr);
+              final date    = DateTime(year, month, dayNum);
+              final dateStr = date.toIso8601String().substring(0, 10);
+              final inRange        = _isInRange(date);
+              final isStoreHoliday = _holidayDates.contains(dateStr);
+              final isSpecial      = _isSpecialPeriod(date);
+              final isJpHoliday    = _isJapaneseHoliday(date);
+              final isDayOff       = _dayOffRequests.containsKey(dateStr);
+              final hasShift       = _shiftRequests.containsKey(dateStr);
 
               Color bgColor;
               if (!inRange) {
@@ -410,8 +439,7 @@ class _ShiftRequestScreenState extends State<ShiftRequestScreen> {
               Color dayColor;
               if (!inRange || isStoreHoliday) {
                 dayColor = Colors.grey[400]!;
-              } else if (date.weekday == DateTime.sunday ||
-                  isJpHoliday) {
+              } else if (date.weekday == DateTime.sunday || isJpHoliday) {
                 dayColor = Colors.red;
               } else if (date.weekday == DateTime.saturday) {
                 dayColor = Colors.blue;
@@ -419,7 +447,7 @@ class _ShiftRequestScreenState extends State<ShiftRequestScreen> {
                 dayColor = Colors.black87;
               }
 
-              String cellText = '';
+              String cellText    = '';
               String cellSubText = '';
               if (isStoreHoliday) {
                 cellText = '休業';
@@ -438,8 +466,7 @@ class _ShiftRequestScreenState extends State<ShiftRequestScreen> {
                           ?.toString()
                           .substring(0, 5) ??
                       '';
-                  cellText =
-                      start.isEmpty ? '出勤' : '$start\n〜$end';
+                  cellText = start.isEmpty ? '出勤' : '$start\n〜$end';
                 }
               } else if (isSpecial) {
                 cellSubText = '★';
@@ -447,8 +474,7 @@ class _ShiftRequestScreenState extends State<ShiftRequestScreen> {
 
               final showJpHolidayLabel =
                   isJpHoliday && inRange && !isStoreHoliday;
-              final canTap =
-                  inRange && isOpen && !isStoreHoliday;
+              final canTap = inRange && isOpen && !isStoreHoliday;
 
               return Expanded(
                 child: GestureDetector(
@@ -486,9 +512,8 @@ class _ShiftRequestScreenState extends State<ShiftRequestScreen> {
                             ),
                             if (cellText.isNotEmpty)
                               Padding(
-                                padding:
-                                    const EdgeInsets.symmetric(
-                                        horizontal: 2),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 2),
                                 child: Text(
                                   cellText,
                                   style: TextStyle(
@@ -526,7 +551,7 @@ class _ShiftRequestScreenState extends State<ShiftRequestScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final isOpen = widget.recruitment['status'] == 'open';
+    final isOpen           = widget.recruitment['status'] == 'open';
     final hasMultipleMonths = _workStart.month != _workEnd.month ||
         _workStart.year != _workEnd.year;
 
@@ -542,9 +567,7 @@ class _ShiftRequestScreenState extends State<ShiftRequestScreen> {
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(12),
-                  color: _isSubmitted
-                      ? Colors.green[50]
-                      : Colors.teal[50],
+                  color: _isSubmitted ? Colors.green[50] : Colors.teal[50],
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -556,49 +579,40 @@ class _ShiftRequestScreenState extends State<ShiftRequestScreen> {
                         '提出期限：${widget.recruitment['request_end']}',
                         style: TextStyle(
                             fontSize: 13,
-                            color: isOpen
-                                ? Colors.teal[700]
-                                : Colors.grey),
+                            color: isOpen ? Colors.teal[700] : Colors.grey),
                       ),
                       if (_isSubmitted)
                         Row(
                           children: [
                             Icon(Icons.check_circle,
-                                size: 14,
-                                color: Colors.green[600]),
+                                size: 14, color: Colors.green[600]),
                             const SizedBox(width: 4),
                             Text(
                               '提出済み（日付をタップして修正→管理者に即反映されます）',
                               style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.green[700]),
+                                  fontSize: 12, color: Colors.green[700]),
                             ),
                           ],
                         ),
                       if (!isOpen)
                         const Text('※ この募集は締め切られています',
-                            style: TextStyle(
-                                fontSize: 12, color: Colors.red)),
+                            style:
+                                TextStyle(fontSize: 12, color: Colors.red)),
                     ],
                   ),
                 ),
                 Padding(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 6),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   child: Wrap(
                     spacing: 10,
                     runSpacing: 4,
                     children: [
-                      _legend(Colors.teal[50]!, Colors.teal[700]!,
-                          '出勤希望'),
-                      _legend(Colors.red[50]!, Colors.red[400]!,
-                          '希望休'),
-                      _legend(Colors.pink[50]!, Colors.pink[400]!,
-                          '繁忙期'),
-                      _legend(Colors.grey[300]!, Colors.grey[500]!,
-                          '休業日'),
-                      _legend(Colors.grey[100]!, Colors.grey[400]!,
-                          '対象外'),
+                      _legend(Colors.teal[50]!, Colors.teal[700]!, '出勤希望'),
+                      _legend(Colors.red[50]!,  Colors.red[400]!,  '希望休'),
+                      _legend(Colors.pink[50]!, Colors.pink[400]!, '繁忙期'),
+                      _legend(Colors.grey[300]!, Colors.grey[500]!, '休業日'),
+                      _legend(Colors.grey[100]!, Colors.grey[400]!, '対象外'),
                     ],
                   ),
                 ),
@@ -609,45 +623,37 @@ class _ShiftRequestScreenState extends State<ShiftRequestScreen> {
                       IconButton(
                         icon: const Icon(Icons.chevron_left),
                         onPressed: _currentMonth.isAfter(DateTime(
-                                _workStart.year,
-                                _workStart.month,
+                                _workStart.year, _workStart.month, 1))
+                            ? () => setState(() => _currentMonth = DateTime(
+                                _currentMonth.year,
+                                _currentMonth.month - 1,
                                 1))
-                            ? () => setState(() =>
-                                _currentMonth = DateTime(
-                                    _currentMonth.year,
-                                    _currentMonth.month - 1,
-                                    1))
                             : null,
                       ),
                       Text(
-                        DateFormat('yyyy年M月')
-                            .format(_currentMonth),
+                        DateFormat('yyyy年M月').format(_currentMonth),
                         style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold),
+                            fontSize: 16, fontWeight: FontWeight.bold),
                       ),
                       IconButton(
                         icon: const Icon(Icons.chevron_right),
                         onPressed: _currentMonth.isBefore(DateTime(
                                 _workEnd.year, _workEnd.month, 1))
-                            ? () => setState(() =>
-                                _currentMonth = DateTime(
-                                    _currentMonth.year,
-                                    _currentMonth.month + 1,
-                                    1))
+                            ? () => setState(() => _currentMonth = DateTime(
+                                _currentMonth.year,
+                                _currentMonth.month + 1,
+                                1))
                             : null,
                       ),
                     ],
                   )
                 else
                   Padding(
-                    padding:
-                        const EdgeInsets.symmetric(vertical: 8),
+                    padding: const EdgeInsets.symmetric(vertical: 8),
                     child: Text(
                       DateFormat('yyyy年M月').format(_currentMonth),
                       style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold),
+                          fontSize: 16, fontWeight: FontWeight.bold),
                     ),
                   ),
                 Expanded(
@@ -662,12 +668,11 @@ class _ShiftRequestScreenState extends State<ShiftRequestScreen> {
                     child: ElevatedButton.icon(
                       onPressed: _isSubmitting ? null : _submit,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: _isSubmitted
-                            ? Colors.green
-                            : Colors.teal,
+                        backgroundColor:
+                            _isSubmitted ? Colors.green : Colors.teal,
                         foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(
-                            vertical: 14),
+                        padding:
+                            const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(8),
                         ),
@@ -677,12 +682,9 @@ class _ShiftRequestScreenState extends State<ShiftRequestScreen> {
                               width: 16,
                               height: 16,
                               child: CircularProgressIndicator(
-                                  color: Colors.white,
-                                  strokeWidth: 2),
+                                  color: Colors.white, strokeWidth: 2),
                             )
-                          : Icon(_isSubmitted
-                              ? Icons.refresh
-                              : Icons.send),
+                          : Icon(_isSubmitted ? Icons.refresh : Icons.send),
                       label: Text(_isSubmitting
                           ? '提出中...'
                           : _isSubmitted
@@ -710,8 +712,7 @@ class _ShiftRequestScreenState extends State<ShiftRequestScreen> {
         ),
         const SizedBox(width: 4),
         Text(label,
-            style:
-                TextStyle(fontSize: 11, color: Colors.grey[600])),
+            style: TextStyle(fontSize: 11, color: Colors.grey[600])),
       ],
     );
   }

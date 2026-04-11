@@ -3,6 +3,8 @@ import 'package:intl/intl.dart';
 import '../services/recruitment_service.dart';
 import '../services/store_service.dart';
 import '../services/store_settings_service.dart';
+import '../services/notification_service.dart';
+import '../services/member_service.dart';
 import 'shift_request_screen.dart';
 import 'admin_shift_overview_screen.dart';
 import 'staff_confirmed_shift_screen.dart';
@@ -15,9 +17,12 @@ class RecruitmentScreen extends StatefulWidget {
 }
 
 class _RecruitmentScreenState extends State<RecruitmentScreen> {
-  final _recruitmentService = RecruitmentService();
-  final _storeService = StoreService();
-  final _settingsService = StoreSettingsService();
+  final _recruitmentService   = RecruitmentService();
+  final _storeService         = StoreService();
+  final _settingsService      = StoreSettingsService();
+  final _notificationService  = NotificationService();
+  final _memberService        = MemberService();
+
   List<Map<String, dynamic>> _recruitments = [];
   List<Map<String, dynamic>> _stores = [];
   String? _selectedStoreId;
@@ -38,10 +43,9 @@ class _RecruitmentScreenState extends State<RecruitmentScreen> {
   }
 
   Future<void> _loadStores() async {
-    // ① stores取得 と 祝日キャッシュウォームアップ を並列実行
     final results = await Future.wait([
       _storeService.getMyStores(),
-      StoreSettingsService.getJapaneseHolidays(), // 戻り値は使わないがキャッシュに乗せる
+      StoreSettingsService.getJapaneseHolidays(),
     ]);
 
     final stores = results[0] as List<Map<String, dynamic>>;
@@ -52,28 +56,25 @@ class _RecruitmentScreenState extends State<RecruitmentScreen> {
 
     if (stores.isNotEmpty) {
       final firstStore = _toMap(stores.first['stores']);
-      storeId = firstStore['id'] as String?;
+      storeId   = firstStore['id']   as String?;
       storeName = firstStore['name'] as String?;
-      role = stores.first['role'] as String?;
+      role      = stores.first['role'] as String?;
     }
 
     setState(() {
-      _stores = stores;
-      _selectedStoreId = storeId;
+      _stores            = stores;
+      _selectedStoreId   = storeId;
       _selectedStoreName = storeName;
-      _selectedRole = role;
+      _selectedRole      = role;
     });
 
-    // ② storeIdが必要なので recruitments はここで取得（依存関係あり）
     if (storeId != null) await _loadRecruitments();
-
     setState(() => _isLoading = false);
   }
 
   Future<void> _loadRecruitments() async {
     if (_selectedStoreId == null) return;
-    final result =
-        await _recruitmentService.getRecruitments(_selectedStoreId!);
+    final result = await _recruitmentService.getRecruitments(_selectedStoreId!);
     setState(() => _recruitments = result);
   }
 
@@ -257,12 +258,12 @@ class _RecruitmentScreenState extends State<RecruitmentScreen> {
     if (step2Ok != true) return;
 
     final recruitment = await _recruitmentService.createRecruitment(
-      storeId: _selectedStoreId!,
-      title: titleController.text.trim(),
-      workStart: workStart!,
-      workEnd: workEnd!,
+      storeId:      _selectedStoreId!,
+      title:        titleController.text.trim(),
+      workStart:    workStart!,
+      workEnd:      workEnd!,
       requestStart: requestStart!,
-      requestEnd: requestEnd!,
+      requestEnd:   requestEnd!,
     );
 
     final recruitmentId = recruitment['id'] as String;
@@ -270,20 +271,43 @@ class _RecruitmentScreenState extends State<RecruitmentScreen> {
     for (final date in selectedHolidays) {
       await _settingsService.addShiftHoliday(
         recruitmentId: recruitmentId,
-        storeId: _selectedStoreId!,
-        date: date,
+        storeId:       _selectedStoreId!,
+        date:          date,
       );
     }
 
     for (final period in specialPeriods) {
       await _settingsService.addSpecialPeriod(
-        recruitmentId: recruitmentId,
-        storeId: _selectedStoreId!,
-        label: period['label'] as String,
-        startDate: period['start_date'] as DateTime,
-        endDate: period['end_date'] as DateTime,
+        recruitmentId:    recruitmentId,
+        storeId:          _selectedStoreId!,
+        label:            period['label'] as String,
+        startDate:        period['start_date'] as DateTime,
+        endDate:          period['end_date'] as DateTime,
         minStaffOverride: period['min_staff_override'] as int,
       );
+    }
+
+    // ── 募集開始通知：店舗の全スタッフ（admin以外）に送信 ──
+    try {
+      final members = await _memberService.getMembers(_selectedStoreId!);
+      final staffIds = members
+          .where((m) => m['role'] != 'admin')
+          .map((m) => m['user_id'] as String)
+          .toList();
+
+      if (staffIds.isNotEmpty) {
+        final periodLabel =
+            '${DateFormat('M/d').format(workStart!)}〜${DateFormat('M/d').format(workEnd!)}';
+        await _notificationService.sendRecruitmentStarted(
+          storeId:          _selectedStoreId!,
+          recipientUserIds: staffIds,
+          storeName:        _selectedStoreName ?? '',
+          periodLabel:      periodLabel,
+          recruitmentId:    recruitmentId,
+        );
+      }
+    } catch (_) {
+      // 通知失敗はサイレントに無視
     }
 
     await _loadRecruitments();
@@ -346,7 +370,7 @@ class _RecruitmentScreenState extends State<RecruitmentScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final fmt = DateFormat('yyyy/MM/dd');
+    final fmt     = DateFormat('yyyy/MM/dd');
     final isAdmin = _selectedRole == 'admin';
 
     if (_isLoading) {
@@ -380,9 +404,9 @@ class _RecruitmentScreenState extends State<RecruitmentScreen> {
                   });
                   final store = _toMap(matched['stores']);
                   setState(() {
-                    _selectedStoreId = v;
+                    _selectedStoreId   = v;
                     _selectedStoreName = store['name'] as String?;
-                    _selectedRole = matched['role'] as String?;
+                    _selectedRole      = matched['role'] as String?;
                   });
                   await _loadRecruitments();
                 },
@@ -410,7 +434,7 @@ class _RecruitmentScreenState extends State<RecruitmentScreen> {
                     padding: const EdgeInsets.all(12),
                     itemCount: _recruitments.length,
                     itemBuilder: (context, index) {
-                      final r = _recruitments[index];
+                      final r      = _recruitments[index];
                       final isOpen = r['status'] == 'open';
                       return Card(
                         margin: const EdgeInsets.only(bottom: 10),
@@ -496,11 +520,11 @@ class _RecruitmentScreenState extends State<RecruitmentScreen> {
                                         Navigator.push(
                                           context,
                                           MaterialPageRoute(
-                                            builder: (_) =>
-                                                AdminShiftOverviewScreen(
-                                              recruitment: r,
-                                              storeId: _selectedStoreId!,
-                                            ),
+                                            builder: (_) => AdminShiftOverviewScreen(
+  recruitment: r,
+  storeId: _selectedStoreId!,
+  storeName: _selectedStoreName ?? '',
+),
                                           ),
                                         );
                                       },
@@ -520,7 +544,6 @@ class _RecruitmentScreenState extends State<RecruitmentScreen> {
                                     ),
                                     Row(
                                       children: [
-                                        // 募集中 → 締め切るボタン
                                         if (isOpen)
                                           TextButton(
                                             onPressed: () async {
@@ -534,7 +557,6 @@ class _RecruitmentScreenState extends State<RecruitmentScreen> {
                                                     color:
                                                         Colors.orange)),
                                           ),
-                                        // 締切済み → 再募集ボタン
                                         if (!isOpen)
                                           TextButton.icon(
                                             onPressed: () =>
@@ -575,17 +597,14 @@ class _RecruitmentScreenState extends State<RecruitmentScreen> {
                                               MaterialPageRoute(
                                                 builder: (_) =>
                                                     ShiftRequestScreen(
-                                                  recruitment: r,
-                                                  storeId:
-                                                      _selectedStoreId!,
-                                                  storeName:
-                                                      _selectedStoreName!,
+                                                  recruitment:  r,
+                                                  storeId:      _selectedStoreId!,
+                                                  storeName:    _selectedStoreName!,
                                                 ),
                                               ),
                                             );
                                           },
-                                          style:
-                                              OutlinedButton.styleFrom(
+                                          style: OutlinedButton.styleFrom(
                                             foregroundColor: Colors.teal,
                                             side: const BorderSide(
                                                 color: Colors.teal),
@@ -611,10 +630,8 @@ class _RecruitmentScreenState extends State<RecruitmentScreen> {
                                               builder: (_) =>
                                                   StaffConfirmedShiftScreen(
                                                 recruitment: r,
-                                                storeId:
-                                                    _selectedStoreId!,
-                                                storeName:
-                                                    _selectedStoreName!,
+                                                storeId:     _selectedStoreId!,
+                                                storeName:   _selectedStoreName!,
                                               ),
                                             ),
                                           );
@@ -708,14 +725,14 @@ class _CustomDatePickerDialogState
 
   @override
   Widget build(BuildContext context) {
-    final year = _displayMonth.year;
-    final month = _displayMonth.month;
-    final firstDay = DateTime(year, month, 1);
-    final lastDay = DateTime(year, month + 1, 0);
+    final year        = _displayMonth.year;
+    final month       = _displayMonth.month;
+    final firstDay    = DateTime(year, month, 1);
+    final lastDay     = DateTime(year, month + 1, 0);
     final startWeekday = firstDay.weekday % 7;
-    final totalCells = startWeekday + lastDay.day;
-    final totalRows = (totalCells / 7).ceil();
-    final fmt = DateFormat('yyyy/MM/dd');
+    final totalCells  = startWeekday + lastDay.day;
+    final totalRows   = (totalCells / 7).ceil();
+    final fmt         = DateFormat('yyyy/MM/dd');
 
     return Dialog(
       insetPadding:
@@ -802,7 +819,7 @@ class _CustomDatePickerDialogState
                         return const Expanded(
                             child: SizedBox(height: 40));
                       }
-                      final date = DateTime(year, month, dayNum);
+                      final date      = DateTime(year, month, dayNum);
                       final isSelected = _selectedDate != null &&
                           _isSameDay(date, _selectedDate!);
                       final isToday =
@@ -972,7 +989,7 @@ class _Step2DialogState extends State<_Step2Dialog>
   }
 
   Future<void> _showAddSpecialPeriodDialog() async {
-    final labelController = TextEditingController();
+    final labelController    = TextEditingController();
     final minStaffController = TextEditingController(text: '3');
     DateTime? start;
     DateTime? end;
@@ -1009,8 +1026,8 @@ class _Step2DialogState extends State<_Step2Dialog>
                             context: ctx,
                             builder: (_) => _CustomDatePickerDialog(
                               initialDate: start ?? widget.workStart,
-                              holidays: widget.japaneseHolidays,
-                              title: '繁忙期 開始日',
+                              holidays:    widget.japaneseHolidays,
+                              title:       '繁忙期 開始日',
                             ),
                           );
                           if (d != null) setInner(() => start = d);
@@ -1030,8 +1047,8 @@ class _Step2DialogState extends State<_Step2Dialog>
                             context: ctx,
                             builder: (_) => _CustomDatePickerDialog(
                               initialDate: end ?? widget.workStart,
-                              holidays: widget.japaneseHolidays,
-                              title: '繁忙期 終了日',
+                              holidays:    widget.japaneseHolidays,
+                              title:       '繁忙期 終了日',
                             ),
                           );
                           if (d != null) setInner(() => end = d);
@@ -1075,12 +1092,11 @@ class _Step2DialogState extends State<_Step2Dialog>
                 }
                 setState(() {
                   widget.specialPeriods.add({
-                    'label': labelController.text.trim(),
-                    'start_date': start!,
-                    'end_date': end!,
+                    'label':             labelController.text.trim(),
+                    'start_date':        start!,
+                    'end_date':          end!,
                     'min_staff_override':
-                        int.tryParse(minStaffController.text.trim()) ??
-                            3,
+                        int.tryParse(minStaffController.text.trim()) ?? 3,
                   });
                 });
                 Navigator.pop(ctx);
@@ -1131,18 +1147,16 @@ class _Step2DialogState extends State<_Step2Dialog>
             spacing: 6,
             runSpacing: 6,
             children: entry.value.map((d) {
-              final selected = _isHolidaySelected(d);
-              final weekday = ['月', '火', '水', '木', '金', '土', '日']
+              final selected   = _isHolidaySelected(d);
+              final weekday    = ['月', '火', '水', '木', '金', '土', '日']
                   [d.weekday - 1];
               final isJpHoliday = _isJapaneseHoliday(d);
-              final textColor =
-                  _dayTextColor(d, selected: selected);
+              final textColor  = _dayTextColor(d, selected: selected);
 
               Color bgColor;
               if (selected) {
                 bgColor = Colors.red[400]!;
-              } else if (d.weekday == DateTime.sunday ||
-                  isJpHoliday) {
+              } else if (d.weekday == DateTime.sunday || isJpHoliday) {
                 bgColor = Colors.red[50]!;
               } else if (d.weekday == DateTime.saturday) {
                 bgColor = Colors.blue[50]!;
