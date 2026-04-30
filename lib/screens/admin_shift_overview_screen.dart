@@ -1,11 +1,12 @@
 import 'dart:convert';
-import 'package:universal_html/html.dart' as html;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'dart:ui' as ui;
 import 'package:intl/intl.dart';
 import '../services/admin_shift_service.dart';
 import '../services/member_service.dart';
+import '../utils/web_download.dart';
 import 'shift_timeline_screen.dart';
 
 class AdminShiftOverviewScreen extends StatefulWidget {
@@ -295,19 +296,27 @@ class _AdminShiftOverviewScreenState
       final bytes = byteData.buffer.asUint8List();
       final base64str = base64Encode(bytes);
       final dataUrl = 'data:image/png;base64,$base64str';
-
       final title = widget.recruitment['title'] ?? 'shift';
-      html.AnchorElement(href: dataUrl)
-        ..setAttribute('download', '$title.png')
-        ..click();
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('シフト表を画像としてダウンロードしました'),
-            backgroundColor: Colors.teal,
-          ),
-        );
+      if (kIsWeb) {
+        webDownload(dataUrl, '$title.png');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('シフト表を画像としてダウンロードしました'),
+              backgroundColor: Colors.teal,
+            ),
+          );
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('シフト表の共有はWeb版でご利用ください'),
+              backgroundColor: Colors.teal,
+            ),
+          );
+        }
       }
     } catch (e) {
       if (mounted) {
