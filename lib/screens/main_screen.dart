@@ -37,6 +37,7 @@ class _MainScreenState extends State<MainScreen> {
   bool _isLoading = true;
   bool _isAdmin   = false;
   int  _selectedIndex = 0;
+  int  _screenKey = 0;
 
   List<Widget>? _screens;
 
@@ -50,7 +51,7 @@ class _MainScreenState extends State<MainScreen> {
     super.initState();
     if (!_isPersonal) {
       StoreSettingsService.getJapaneseHolidays();
-      _loadStores();
+      _loadStores().then((_) => _startNotificationPolling());
     } else {
       _loadPersonalStores();
     }
@@ -67,7 +68,7 @@ class _MainScreenState extends State<MainScreen> {
       final stores  = await _storeService.getMyStores();
       final isAdmin = stores.any((m) => m['role'] == 'admin');
 
-      List<Map<String, dynamic>> allStores = stores;
+      List<Map<String, dynamic>> allStores = List.from(stores);
       if (!isAdmin) {
         try {
           final userId = Supabase.instance.client.auth.currentUser?.id;
@@ -78,7 +79,7 @@ class _MainScreenState extends State<MainScreen> {
                 .eq('user_id', userId)
                 .order('sort_order');
             final personalList =
-                (personalStores as List).map((s) => {
+                (personalStores as List).map((s) => <String, dynamic>{
                   'stores': {
                     'id': s['id'],
                     'name': s['name'],
@@ -86,6 +87,7 @@ class _MainScreenState extends State<MainScreen> {
                   'display_color': s['color'],
                   'role': 'personal',
                 }).toList();
+            debugPrint('personalList colors: ${personalList.map((s) => s['display_color']).toList()}');
             allStores = [...stores, ...personalList];
           }
         } catch (e) {
@@ -93,15 +95,17 @@ class _MainScreenState extends State<MainScreen> {
         }
       }
 
-      setState(() {
-        _stores    = allStores;
-        _isAdmin   = isAdmin;
-        _isLoading = false;
-        _screens   = null;
-      });
-      _startNotificationPolling();
+      if (mounted) {
+        setState(() {
+          _stores    = allStores;
+          _isAdmin   = isAdmin;
+          _isLoading = false;
+          _screens   = null;
+          _screenKey++;
+        });
+      }
     } catch (e) {
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -117,7 +121,7 @@ class _MainScreenState extends State<MainScreen> {
           .order('sort_order');
       if (mounted) {
         setState(() {
-          _stores = (data as List).map((s) => {
+          _stores = (data as List).map((s) => <String, dynamic>{
             'stores': {
               'id': s['id'],
               'name': s['name'],
@@ -126,6 +130,7 @@ class _MainScreenState extends State<MainScreen> {
           }).toList();
           _isLoading = false;
           _screens   = null;
+          _screenKey++;
         });
       }
     } catch (e) {
@@ -135,6 +140,7 @@ class _MainScreenState extends State<MainScreen> {
 
   void _startNotificationPolling() {
     _fetchUnreadCount();
+    _pollingTimer?.cancel();
     _pollingTimer = Timer.periodic(
       const Duration(seconds: 30),
       (_) => _fetchUnreadCount(),
@@ -148,12 +154,12 @@ class _MainScreenState extends State<MainScreen> {
     }
   }
 
-  Future<void> _onSettingsSaved() async {
-    await Future.wait([
-      _calendarKey.currentState?.reloadColors() ?? Future.value(),
-      _payrollKey.currentState?.reloadColors()  ?? Future.value(),
-      _settingsKey.currentState?.reloadColors() ?? Future.value(),
-    ]);
+  Future<void> _reloadAfterSettingsSaved() async {
+    if (_isPersonal) {
+      await _loadPersonalStores();
+    } else {
+      await _loadStores();
+    }
   }
 
   Future<void> _signOut() async {
@@ -191,7 +197,7 @@ class _MainScreenState extends State<MainScreen> {
         StaffSettingsScreen(
           key: _settingsKey,
           stores: _stores,
-          onSaved: _onSettingsSaved,
+          onSaved: _reloadAfterSettingsSaved,
         ),
       ];
     }
@@ -224,7 +230,7 @@ class _MainScreenState extends State<MainScreen> {
       StaffSettingsScreen(
         key: _settingsKey,
         stores: _stores,
-        onSaved: _onSettingsSaved,
+        onSaved: _reloadAfterSettingsSaved,
       ),
     ];
   }
@@ -372,6 +378,7 @@ class _MainScreenState extends State<MainScreen> {
         ],
       ),
       body: IndexedStack(
+        key: ValueKey(_screenKey),
         index: currentIndex,
         children: screens,
       ),

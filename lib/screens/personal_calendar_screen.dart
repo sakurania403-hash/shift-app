@@ -489,16 +489,17 @@ class PersonalCalendarScreenState extends State<PersonalCalendarScreen> {
                   }),
                   // 職場追加ボタン
                   GestureDetector(
-                    onTap: () async {
-                      await Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) =>
-                              const PersonalStoreScreen(),
-                        ),
-                      );
-                      await _loadAll();
-                    },
+                      onTap: () async {
+                        await Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => PersonalStoreScreen(
+                              onChanged: _loadAll,
+                            ),
+                          ),
+                        );
+                        await _loadAll();
+                      },
                     child: Container(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 12, vertical: 6),

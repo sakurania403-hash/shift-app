@@ -28,7 +28,8 @@ Color _hexToColor(String hex) {
 }
 
 class PersonalStoreScreen extends StatefulWidget {
-  const PersonalStoreScreen({super.key});
+  final VoidCallback? onChanged;
+  const PersonalStoreScreen({super.key, this.onChanged});
 
   @override
   State<PersonalStoreScreen> createState() => _PersonalStoreScreenState();
@@ -193,11 +194,13 @@ class _PersonalStoreScreenState extends State<PersonalStoreScreen> {
           .eq('id', id);
     }
     await _loadStores();
+    widget.onChanged?.call();
   }
 
   Future<void> _deleteStore(String id) async {
     await _supabase.from('personal_stores').delete().eq('id', id);
     await _loadStores();
+    widget.onChanged?.call();
   }
 
   @override

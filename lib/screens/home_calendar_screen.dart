@@ -72,6 +72,8 @@ class HomeCalendarScreenState extends State<HomeCalendarScreen> {
       final store   = _toMap(m['stores']);
       final id      = store['id'] as String;
       _nameMap[id]  = store['name'] as String? ?? '';
+      final role    = m['role'] as String? ?? 'staff';
+      if (role == 'personal') continue; // 個人追加職場はスキップ
       final displayColorHex = m['display_color'] as String?;
       if (displayColorHex != null && displayColorHex.isNotEmpty) {
         _colorMap[id] = _hexToColor(displayColorHex);
@@ -168,6 +170,10 @@ class HomeCalendarScreenState extends State<HomeCalendarScreen> {
     } catch (e) {
       debugPrint('reloadColors error: $e');
     }
+  }
+
+  Future<void> reloadShifts() async {
+    await _loadMyShifts();
   }
 
   Map<String, dynamic> _toMap(dynamic v) {
@@ -609,7 +615,9 @@ class HomeCalendarScreenState extends State<HomeCalendarScreen> {
               ),
             ),
             // 各店舗
-            ...allEntries.map((entry) {
+            ...allEntries
+                .where((entry) => entry.value.isNotEmpty) // 名前が空のものを除外
+                .map((entry) {
               final id      = entry.key;
               final name    = entry.value;
               final color   = _storeColor(id);

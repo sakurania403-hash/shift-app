@@ -94,16 +94,33 @@ class StaffSettingsScreenState extends State<StaffSettingsScreen> {
     _buildColorMap();
   }
 
+  @override
+  void didUpdateWidget(StaffSettingsScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.stores != widget.stores) {
+      _buildColorMap();
+      setState(() {});
+    }
+  }
+
   void _buildColorMap() {
     _colorMap = {};
     for (var i = 0; i < widget.stores.length; i++) {
       final m        = widget.stores[i];
       final store    = _toMap(m['stores']);
       final id       = store['id'] as String;
+      final role     = m['role'] as String? ?? 'staff';
       final colorHex = m['display_color'] as String?;
-      _colorMap[id]  = (colorHex != null && colorHex.isNotEmpty)
-          ? _hexToColor(colorHex)
-          : kStoreColorPalette[i % kStoreColorPalette.length];
+      debugPrint('buildColorMap: id=$id role=$role colorHex=$colorHex');
+      if (role == 'personal') {
+        _colorMap[id] = (colorHex != null && colorHex.isNotEmpty)
+            ? _hexToColor(colorHex)
+            : kStoreColorPalette[i % kStoreColorPalette.length];
+      } else {
+        _colorMap[id] = (colorHex != null && colorHex.isNotEmpty)
+            ? _hexToColor(colorHex)
+            : kStoreColorPalette[i % kStoreColorPalette.length];
+      }
     }
   }
 
@@ -111,30 +128,59 @@ class StaffSettingsScreenState extends State<StaffSettingsScreen> {
     final userId = _supabase.auth.currentUser?.id;
     if (userId == null) return;
     try {
+      // 店舗モードの色を取得
       final storeIds = widget.stores
+          .where((m) => (m['role'] as String? ?? 'staff') != 'personal')
           .map((m) => _toMap(m['stores'])['id'] as String)
           .toList();
-      final rows = await _supabase
-          .from('store_memberships')
-          .select('store_id, display_color')
-          .eq('user_id', userId)
-          .inFilter('store_id', storeIds);
+
+      Map<String, String?> membershipColors = {};
+      if (storeIds.isNotEmpty) {
+        final rows = await _supabase
+            .from('store_memberships')
+            .select('store_id, display_color')
+            .eq('user_id', userId)
+            .inFilter('store_id', storeIds);
+        for (final r in rows) {
+          final m = Map<String, dynamic>.from(r as Map);
+          membershipColors[m['store_id'] as String] =
+              m['display_color'] as String?;
+        }
+      }
+
+      // 個人追加職場の色を取得
+      Map<String, String?> personalColors = {};
+      final personalStoreIds = widget.stores
+          .where((m) => (m['role'] as String? ?? 'staff') == 'personal')
+          .map((m) => _toMap(m['stores'])['id'] as String)
+          .toList();
+      if (personalStoreIds.isNotEmpty) {
+        final rows = await _supabase
+            .from('personal_stores')
+            .select('id, color')
+            .inFilter('id', personalStoreIds);
+        for (final r in rows) {
+          final m = Map<String, dynamic>.from(r as Map);
+          personalColors[m['id'] as String] = m['color'] as String?;
+        }
+      }
 
       if (mounted) {
         setState(() {
           for (var i = 0; i < widget.stores.length; i++) {
             final store = _toMap(widget.stores[i]['stores']);
             final id    = store['id'] as String;
-            final matching = rows
-                .where((r) => (r as Map)['store_id'] == id)
-                .toList();
-            if (matching.isNotEmpty) {
-              final hex = (matching.first as Map)['display_color'] as String?;
-              if (hex != null && hex.isNotEmpty) {
-                _colorMap[id] = _hexToColor(hex);
-              } else {
-                _colorMap[id] = kStoreColorPalette[i % kStoreColorPalette.length];
-              }
+            final role  = widget.stores[i]['role'] as String? ?? 'staff';
+            String? hex;
+            if (role == 'personal') {
+              hex = personalColors[id];
+            } else {
+              hex = membershipColors[id];
+            }
+            if (hex != null && hex.isNotEmpty) {
+              _colorMap[id] = _hexToColor(hex);
+            } else {
+              _colorMap[id] = kStoreColorPalette[i % kStoreColorPalette.length];
             }
           }
         });
@@ -192,9 +238,12 @@ class StaffSettingsScreenState extends State<StaffSettingsScreen> {
                     await Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) => const PersonalStoreScreen(),
+                        builder: (_) => PersonalStoreScreen(
+                          onChanged: widget.onSaved,
+                        ),
                       ),
                     );
+                    widget.onSaved?.call();
                   },
                 ),
               ],
@@ -457,12 +506,24 @@ class _StoreDetailScreenState extends State<_StoreDetailScreen> {
     final userId = _supabase.auth.currentUser?.id;
     if (userId == null) return;
     try {
-      await _supabase
-          .from('store_memberships')
-          .update({'display_color': _colorToHex(color)})
-          .eq('user_id', userId)
-          .eq('store_id', storeId);
+      final role = widget.storeData['role'] as String? ?? 'staff';
+      if (role == 'personal') {
+        // 個人追加職場はpersonal_storesに保存
+        await _supabase
+            .from('personal_stores')
+            .update({'color': _colorToHex(color)})
+            .eq('id', storeId)
+            .eq('user_id', userId);
+      } else {
+        // 店舗モードはstore_membershipsに保存
+        await _supabase
+            .from('store_memberships')
+            .update({'display_color': _colorToHex(color)})
+            .eq('user_id', userId)
+            .eq('store_id', storeId);
+      }
       setState(() => displayColor = color);
+      widget.onSaved?.call();
     } catch (e) {
       debugPrint('saveColor error: $e');
     }
