@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/auth_service.dart';
 import '../services/store_service.dart';
 import '../services/store_settings_service.dart';
@@ -13,9 +14,12 @@ import 'member_management_screen.dart';
 import 'staff_payroll_screen.dart';
 import 'staff_settings_screen.dart';
 import 'home_calendar_screen.dart';
+import 'personal_calendar_screen.dart';
+import 'personal_store_screen.dart';
 
 class MainScreen extends StatefulWidget {
-  const MainScreen({super.key});
+  final String mode;
+  const MainScreen({super.key, this.mode = 'store'});
 
   @override
   State<MainScreen> createState() => _MainScreenState();
@@ -37,15 +41,20 @@ class _MainScreenState extends State<MainScreen> {
 
   List<Widget>? _screens;
 
-  // 通知関連
   int _unreadCount = 0;
   Timer? _pollingTimer;
+
+  bool get _isPersonal => widget.mode == 'personal';
 
   @override
   void initState() {
     super.initState();
-    StoreSettingsService.getJapaneseHolidays();
-    _loadStores();
+    if (!_isPersonal) {
+      StoreSettingsService.getJapaneseHolidays();
+      _loadStores();
+    } else {
+      _loadPersonalStores();
+    }
   }
 
   @override
@@ -67,6 +76,34 @@ class _MainScreenState extends State<MainScreen> {
       _startNotificationPolling();
     } catch (e) {
       setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _loadPersonalStores() async {
+    setState(() => _isLoading = true);
+    try {
+      final userId = Supabase.instance.client.auth.currentUser?.id;
+      if (userId == null) return;
+      final data = await Supabase.instance.client
+          .from('personal_stores')
+          .select()
+          .eq('user_id', userId)
+          .order('sort_order');
+      if (mounted) {
+        setState(() {
+          _stores = (data as List).map((s) => {
+            'stores': {
+              'id': s['id'],
+              'name': s['name'],
+            },
+            'display_color': s['color'],
+          }).toList();
+          _isLoading = false;
+          _screens   = null;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -103,9 +140,7 @@ class _MainScreenState extends State<MainScreen> {
     }
   }
 
-  // 通知ドロワーを開く
   void _openNotificationDrawer() {
-    // 管理者は index=1、スタッフも index=1 がシフト募集タブ
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -114,7 +149,6 @@ class _MainScreenState extends State<MainScreen> {
         notificationService: _notificationService,
         onRead: _fetchUnreadCount,
         onTapNotification: (n) {
-          // ドロワーを閉じてシフト募集タブへ遷移
           Navigator.pop(context);
           setState(() => _selectedIndex = 1);
         },
@@ -123,6 +157,19 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   List<Widget> _buildScreens() {
+    // 個人モード
+    if (_isPersonal) {
+      return [
+        const PersonalCalendarScreen(),
+        StaffPayrollScreen(stores: _stores),
+        StaffSettingsScreen(
+          key: _settingsKey,
+          stores: _stores,
+          onSaved: _onSettingsSaved,
+        ),
+      ];
+    }
+    // 店舗モード（管理者）
     if (_isAdmin) {
       return [
         HomeCalendarScreen(
@@ -135,25 +182,25 @@ class _MainScreenState extends State<MainScreen> {
         const InviteScreen(),
         StoreSettingsScreen(),
       ];
-    } else {
-      return [
-        HomeCalendarScreen(
-          key: _calendarKey,
-          stores: _stores,
-          isAdmin: false,
-        ),
-        const RecruitmentScreen(),
-        StaffPayrollScreen(
-          key: _payrollKey,
-          stores: _stores,
-        ),
-        StaffSettingsScreen(
-          key: _settingsKey,
-          stores: _stores,
-          onSaved: _onSettingsSaved,
-        ),
-      ];
     }
+    // 店舗モード（スタッフ）
+    return [
+      HomeCalendarScreen(
+        key: _calendarKey,
+        stores: _stores,
+        isAdmin: false,
+      ),
+      const RecruitmentScreen(),
+      StaffPayrollScreen(
+        key: _payrollKey,
+        stores: _stores,
+      ),
+      StaffSettingsScreen(
+        key: _settingsKey,
+        stores: _stores,
+        onSaved: _onSettingsSaved,
+      ),
+    ];
   }
 
   @override
@@ -164,11 +211,29 @@ class _MainScreenState extends State<MainScreen> {
       );
     }
 
-    if (_stores.isEmpty) {
+    if (!_isPersonal && _stores.isEmpty) {
       return const StoreSetupScreen();
     }
 
     _screens ??= _buildScreens();
+
+    const personalDestinations = [
+      NavigationDestination(
+        icon: Icon(Icons.calendar_month_outlined),
+        selectedIcon: Icon(Icons.calendar_month),
+        label: 'ホーム',
+      ),
+      NavigationDestination(
+        icon: Icon(Icons.calculate_outlined),
+        selectedIcon: Icon(Icons.calculate),
+        label: '給料計算',
+      ),
+      NavigationDestination(
+        icon: Icon(Icons.settings_outlined),
+        selectedIcon: Icon(Icons.settings),
+        label: '設定',
+      ),
+    ];
 
     const adminDestinations = [
       NavigationDestination(
@@ -221,52 +286,59 @@ class _MainScreenState extends State<MainScreen> {
       ),
     ];
 
-    final destinations = _isAdmin ? adminDestinations : staffDestinations;
+    final destinations = _isPersonal
+        ? personalDestinations
+        : _isAdmin
+            ? adminDestinations
+            : staffDestinations;
+
     final screens      = _screens!;
     final currentIndex =
         _selectedIndex >= screens.length ? 0 : _selectedIndex;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('シフト管理アプリ'),
+        title: const Text('シフトチェック'),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         actions: [
-          Stack(
-            clipBehavior: Clip.none,
-            children: [
-              IconButton(
-                icon: const Icon(Icons.notifications_outlined),
-                onPressed: _openNotificationDrawer,
-              ),
-              if (_unreadCount > 0)
-                Positioned(
-                  right: 6,
-                  top: 6,
-                  child: IgnorePointer(
-                    child: Container(
-                      padding: const EdgeInsets.all(3),
-                      decoration: const BoxDecoration(
-                        color: Colors.red,
-                        shape: BoxShape.circle,
-                      ),
-                      constraints: const BoxConstraints(
-                        minWidth: 18,
-                        minHeight: 18,
-                      ),
-                      child: Text(
-                        _unreadCount > 99 ? '99+' : '$_unreadCount',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
+          if (!_isPersonal) ...[
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.notifications_outlined),
+                  onPressed: _openNotificationDrawer,
+                ),
+                if (_unreadCount > 0)
+                  Positioned(
+                    right: 6,
+                    top: 6,
+                    child: IgnorePointer(
+                      child: Container(
+                        padding: const EdgeInsets.all(3),
+                        decoration: const BoxDecoration(
+                          color: Colors.red,
+                          shape: BoxShape.circle,
                         ),
-                        textAlign: TextAlign.center,
+                        constraints: const BoxConstraints(
+                          minWidth: 18,
+                          minHeight: 18,
+                        ),
+                        child: Text(
+                          _unreadCount > 99 ? '99+' : '$_unreadCount',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
                       ),
                     ),
                   ),
-                ),
-            ],
-          ),
+              ],
+            ),
+          ],
           IconButton(
             icon: const Icon(Icons.logout),
             onPressed: _signOut,
@@ -277,12 +349,14 @@ class _MainScreenState extends State<MainScreen> {
         index: currentIndex,
         children: screens,
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: currentIndex,
-        onDestinationSelected: (i) =>
-            setState(() => _selectedIndex = i),
-        destinations: destinations,
-      ),
+      bottomNavigationBar: destinations.length > 1
+          ? NavigationBar(
+              selectedIndex: currentIndex,
+              onDestinationSelected: (i) =>
+                  setState(() => _selectedIndex = i),
+              destinations: destinations,
+            )
+          : null,
     );
   }
 }
@@ -329,14 +403,12 @@ class _NotificationDrawerState extends State<NotificationDrawer> {
     }
   }
 
-  // 個別削除
   Future<void> _deleteNotification(int index) async {
     final n = _notifications[index];
     setState(() => _notifications.removeAt(index));
     try {
       await widget.notificationService.deleteNotification(n.id);
     } catch (_) {
-      // 失敗したら元に戻す
       if (mounted) {
         setState(() => _notifications.insert(index, n));
       }
@@ -391,7 +463,6 @@ class _NotificationDrawerState extends State<NotificationDrawer> {
       ),
       child: Column(
         children: [
-          // ハンドル
           Container(
             margin: const EdgeInsets.only(top: 12, bottom: 4),
             width: 40,
@@ -401,7 +472,6 @@ class _NotificationDrawerState extends State<NotificationDrawer> {
               borderRadius: BorderRadius.circular(2),
             ),
           ),
-          // ヘッダー
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: Row(
@@ -423,7 +493,6 @@ class _NotificationDrawerState extends State<NotificationDrawer> {
               ],
             ),
           ),
-          // スワイプ説明
           if (!_isLoading && _notifications.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(right: 16, bottom: 4),
@@ -436,7 +505,6 @@ class _NotificationDrawerState extends State<NotificationDrawer> {
               ),
             ),
           const Divider(height: 1),
-          // リスト
           Expanded(
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator())
@@ -509,7 +577,6 @@ class _NotificationDrawerState extends State<NotificationDrawer> {
                                 ],
                               ),
                               isThreeLine: true,
-                              // タップ可能であることを示す矢印
                               trailing: Icon(
                                 Icons.chevron_right,
                                 size: 16,

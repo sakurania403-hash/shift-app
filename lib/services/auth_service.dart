@@ -8,6 +8,7 @@ class AuthService {
     required String email,
     required String password,
     required String name,
+    String mode = 'store',
   }) async {
     final response = await _supabase.auth.signUp(
       email: email,
@@ -20,6 +21,7 @@ class AuthService {
         'id': response.user!.id,
         'name': name,
         'email': email,
+        'mode': mode,
       });
     }
 
@@ -47,4 +49,16 @@ class AuthService {
 
   // ログイン状態の監視
   Stream<AuthState> get authStateChanges => _supabase.auth.onAuthStateChange;
+
+  // モード取得
+  Future<String> getUserMode() async {
+    final userId = _supabase.auth.currentUser?.id;
+    if (userId == null) return 'store';
+    final data = await _supabase
+        .from('user_profiles')
+        .select('mode')
+        .eq('id', userId)
+        .single();
+    return data['mode'] as String? ?? 'store';
+  }
 }

@@ -474,27 +474,42 @@ class StaffPayrollScreenState extends State<StaffPayrollScreen> {
     try {
       final period   = d.calcPayPeriod(_year, _month);
       final holidays = await StoreSettingsService.getJapaneseHolidays();
-      final raw = await _supabase
-          .from('shifts')
-          .select('date, start_time, end_time')
-          .eq('store_id', d.storeId)
-          .eq('user_id', userId)
-          .gte('date', period.periodStart.toIso8601String().substring(0, 10))
-          .lte('date', period.periodEnd.toIso8601String().substring(0, 10))
-          .order('date');
+
+      List<Map<String, dynamic>> raw;
+
+      // 個人モード（personal_storesのIDを使用）
+      final isPersonal = await _isPersonalStore(d.storeId);
+      if (isPersonal) {
+        final data = await _supabase
+            .from('personal_shifts')
+            .select('date, start_time, end_time')
+            .eq('user_id', userId)
+            .eq('personal_store_id', d.storeId)
+            .gte('date', period.periodStart.toIso8601String().substring(0, 10))
+            .lte('date', period.periodEnd.toIso8601String().substring(0, 10))
+            .order('date');
+        raw = data.map((r) => Map<String, dynamic>.from(r as Map)).toList();
+      } else {
+        final data = await _supabase
+            .from('shifts')
+            .select('date, start_time, end_time')
+            .eq('store_id', d.storeId)
+            .eq('user_id', userId)
+            .gte('date', period.periodStart.toIso8601String().substring(0, 10))
+            .lte('date', period.periodEnd.toIso8601String().substring(0, 10))
+            .order('date');
+        raw = data.map((r) => Map<String, dynamic>.from(r as Map)).toList();
+      }
 
       final records = <_ShiftRecord>[];
-      for (final r in raw) {
-        final mm       = Map<String, dynamic>.from(r as Map);
+      for (final mm in raw) {
         final date     = DateTime.parse(mm['date'] as String);
         final startRaw = mm['start_time'] as String?;
         final endRaw   = mm['end_time']   as String?;
         final start    = startRaw != null ? startRaw.substring(0, 5) : '09:00';
         final end      = endRaw   != null ? endRaw.substring(0, 5)   : '00:00';
-
         final isJpHol   = StoreSettingsService.isHoliday(date, holidays);
         final isHoliday = isJpHol || d.holidayWeekdays.contains(date.weekday % 7);
-
         records.add(_ShiftRecord(
           date:      date,
           startTime: start,
@@ -507,6 +522,19 @@ class StaffPayrollScreenState extends State<StaffPayrollScreen> {
       debugPrint('_loadShifts error: $e');
     } finally {
       if (mounted) setState(() => d.shiftsLoading = false);
+    }
+  }
+
+  Future<bool> _isPersonalStore(String storeId) async {
+    try {
+      final data = await _supabase
+          .from('personal_stores')
+          .select('id')
+          .eq('id', storeId)
+          .maybeSingle();
+      return data != null;
+    } catch (_) {
+      return false;
     }
   }
 
