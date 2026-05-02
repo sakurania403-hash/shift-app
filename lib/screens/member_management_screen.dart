@@ -36,34 +36,39 @@ class _MemberManagementScreenState extends State<MemberManagementScreen>
   }
 
   Future<void> _loadStores() async {
-    final stores = await _storeService.getMyStores();
-    final adminStores = stores.where((m) => m['role'] == 'admin').toList();
-    if (adminStores.isEmpty) {
-      setState(() => _isLoading = false);
-      return;
+    try {
+      final stores = await _storeService.getMyStores();
+      final adminStores = stores.where((m) => m['role'] == 'admin').toList();
+      if (mounted) {
+        setState(() {
+          _stores = adminStores;
+          _isLoading = false;
+          if (adminStores.isNotEmpty) {
+            final store = Map<String, dynamic>.from(
+                adminStores.first['stores'] as Map);
+            _selectedStoreId   = store['id'] as String;
+            _selectedStoreName = store['name'] as String;
+          }
+        });
+      }
+      if (_selectedStoreId != null) await _loadData();
+    } catch (e) {
+      if (mounted) setState(() => _isLoading = false);
     }
-    final first = Map<String, dynamic>.from(adminStores.first['stores'] as Map);
-    setState(() {
-      _stores = adminStores;
-      _selectedStoreId = first['id'];
-      _selectedStoreName = first['name'];
-    });
-    await _loadData();
   }
 
   Future<void> _loadData() async {
     if (_selectedStoreId == null) return;
     setState(() => _isLoading = true);
-    final members = await _memberService.getMembers(_selectedStoreId!);
+    final members    = await _memberService.getMembers(_selectedStoreId!);
     final tempLabels = await _memberService.getTempLabels(_selectedStoreId!);
     setState(() {
-      _members = members;
+      _members    = members;
       _tempLabels = tempLabels;
-      _isLoading = false;
+      _isLoading  = false;
     });
   }
 
-  // メンバー編集ダイアログ
   Future<void> _showEditMemberDialog(Map<String, dynamic> member) async {
     final profile = Map<String, dynamic>.from(member['user_profiles'] as Map);
     final nameController = TextEditingController(text: profile['name'] ?? '');
@@ -121,10 +126,9 @@ class _MemberManagementScreenState extends State<MemberManagementScreen>
     );
   }
 
-  // メンバー削除確認ダイアログ
   Future<void> _showRemoveMemberDialog(Map<String, dynamic> member) async {
     final profile = Map<String, dynamic>.from(member['user_profiles'] as Map);
-    final name = profile['name'] ?? '';
+    final name    = profile['name'] ?? '';
     final isAdmin = member['role'] == 'admin';
     if (isAdmin) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -159,7 +163,6 @@ class _MemberManagementScreenState extends State<MemberManagementScreen>
     }
   }
 
-  // ヘルプラベル追加ダイアログ
   Future<void> _showAddLabelDialog() async {
     final controller = TextEditingController();
     await showDialog(
@@ -213,7 +216,6 @@ class _MemberManagementScreenState extends State<MemberManagementScreen>
     return Scaffold(
       body: Column(
         children: [
-          // 店舗選択
           if (_stores.length > 1)
             Padding(
               padding: const EdgeInsets.all(12),
@@ -225,7 +227,8 @@ class _MemberManagementScreenState extends State<MemberManagementScreen>
                   isDense: true,
                 ),
                 items: _stores.map((m) {
-                  final store = Map<String, dynamic>.from(m['stores'] as Map);
+                  final store =
+                      Map<String, dynamic>.from(m['stores'] as Map);
                   return DropdownMenuItem(
                     value: store['id'] as String,
                     child: Text(store['name']),
@@ -234,16 +237,17 @@ class _MemberManagementScreenState extends State<MemberManagementScreen>
                 onChanged: (v) async {
                   final store = Map<String, dynamic>.from(
                       (_stores.firstWhere((m) =>
-                          (Map<String, dynamic>.from(m['stores'] as Map))['id'] == v)['stores']) as Map);
+                              (Map<String, dynamic>.from(
+                                  m['stores'] as Map))['id'] ==
+                              v)['stores']) as Map);
                   setState(() {
-                    _selectedStoreId = v;
+                    _selectedStoreId   = v;
                     _selectedStoreName = store['name'];
                   });
                   await _loadData();
                 },
               ),
             ),
-          // タブ
           TabBar(
             controller: _tabController,
             labelColor: Colors.teal,
@@ -267,7 +271,6 @@ class _MemberManagementScreenState extends State<MemberManagementScreen>
     );
   }
 
-  // スタッフタブ
   Widget _buildStaffTab() {
     return Column(
       children: [
@@ -284,14 +287,12 @@ class _MemberManagementScreenState extends State<MemberManagementScreen>
           child: ReorderableListView.builder(
             itemCount: _members.length,
             onReorder: (oldIndex, newIndex) async {
-              // 管理者行は動かせない
               if (_members[oldIndex]['role'] == 'admin') return;
-              if (newIndex > 0 && _members[newIndex - 1]['role'] == 'admin' &&
+              if (newIndex > 0 &&
+                  _members[newIndex - 1]['role'] == 'admin' &&
                   oldIndex > newIndex) return;
-
               setState(() {
                 if (newIndex > oldIndex) newIndex--;
-                // 管理者より上には移動させない
                 final adminCount =
                     _members.where((m) => m['role'] == 'admin').length;
                 if (newIndex < adminCount) newIndex = adminCount;
@@ -301,19 +302,18 @@ class _MemberManagementScreenState extends State<MemberManagementScreen>
               await _memberService.updateMemberOrder(_members);
             },
             itemBuilder: (context, index) {
-              final member = _members[index];
+              final member  = _members[index];
               final profile =
                   Map<String, dynamic>.from(member['user_profiles'] as Map);
-              final name = profile['name'] ?? '';
-              final email = profile['email'] ?? '';
-              final role = member['role'] as String;
+              final name    = profile['name'] ?? '';
+              final email   = profile['email'] ?? '';
+              final role    = member['role'] as String;
               final isAdmin = role == 'admin';
 
               return ListTile(
                 key: ValueKey(member['id']),
                 leading: CircleAvatar(
-                  backgroundColor:
-                      isAdmin ? Colors.teal : Colors.teal[100],
+                  backgroundColor: isAdmin ? Colors.teal : Colors.teal[100],
                   child: Text(
                     name.isNotEmpty ? name[0] : '?',
                     style: TextStyle(
@@ -325,7 +325,8 @@ class _MemberManagementScreenState extends State<MemberManagementScreen>
                 title: Row(
                   children: [
                     Text(name,
-                        style: const TextStyle(fontWeight: FontWeight.w500)),
+                        style:
+                            const TextStyle(fontWeight: FontWeight.w500)),
                     const SizedBox(width: 8),
                     if (isAdmin)
                       Container(
@@ -367,7 +368,6 @@ class _MemberManagementScreenState extends State<MemberManagementScreen>
     );
   }
 
-  // ヘルプ・タイミータブ
   Widget _buildTempLabelTab() {
     return Column(
       children: [

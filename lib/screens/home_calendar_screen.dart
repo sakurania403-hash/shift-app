@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'personal_store_screen.dart';
 
 final _supabase = Supabase.instance.client;
 
@@ -42,9 +43,16 @@ class HomeCalendarScreenState extends State<HomeCalendarScreen> {
   bool _timelineLoading = false;
   String? _expandedStoreId;
   bool _storeTimelineLoading = false;
+  String? _selectedStoreId; // 職場フィルター
 
   late Map<String, Color>  _colorMap;
   late Map<String, String> _nameMap;
+
+  // 個人追加職場
+  List<Map<String, dynamic>> _personalStores = [];
+  Map<String, Color> _personalColorMap = {};
+  Map<String, String> _personalNameMap = {};
+  List<Map<String, dynamic>> _personalShifts = [];
 
   @override
   void initState() {
@@ -73,61 +81,103 @@ class HomeCalendarScreenState extends State<HomeCalendarScreen> {
     }
   }
 
-  // ─── 外から呼べる色リロードメソッド ──────────────────────────
+  Future<void> _loadPersonalShifts() async {
+    try {
+      final userId = _supabase.auth.currentUser?.id;
+      if (userId == null) return;
+
+      final storesData = await _supabase
+          .from('personal_stores')
+          .select()
+          .eq('user_id', userId)
+          .order('sort_order');
+
+      final stores = List<Map<String, dynamic>>.from(storesData);
+
+      final colorMap = <String, Color>{};
+      final nameMap  = <String, String>{};
+      for (final s in stores) {
+        final id    = s['id'] as String;
+        final name  = s['name'] as String;
+        final hex   = s['color'] as String? ?? '#2C7873';
+        nameMap[id]  = name;
+        colorMap[id] = _hexToColor(hex);
+      }
+
+      final fromStr = DateTime(_year, _month, 1)
+          .toIso8601String().substring(0, 10);
+      final toStr = DateTime(_year, _month + 1, 0)
+          .toIso8601String().substring(0, 10);
+
+      final shiftsData = await _supabase
+          .from('personal_shifts')
+          .select()
+          .eq('user_id', userId)
+          .gte('date', fromStr)
+          .lte('date', toStr)
+          .order('date');
+
+      if (mounted) {
+        setState(() {
+          _personalStores   = stores;
+          _personalColorMap = colorMap;
+          _personalNameMap  = nameMap;
+          _personalShifts   = List<Map<String, dynamic>>.from(shiftsData);
+        });
+      }
+    } catch (e) {
+      debugPrint('loadPersonalShifts error: $e');
+    }
+  }
+
   Future<void> reloadColors() async {
-  debugPrint('=== reloadColors called ===');
-  final userId = _supabase.auth.currentUser?.id;
-  if (userId == null) {
-    debugPrint('=== userId is null ===');
-    return;
-  }
-  try {
-    final storeIds = widget.stores
-        .map((m) => _toMap(m['stores'])['id'] as String)
-        .toList();
-    debugPrint('=== storeIds: $storeIds ===');
-    
-    final rows = await _supabase
-        .from('store_memberships')
-        .select('store_id, display_color')
-        .eq('user_id', userId)
-        .inFilter('store_id', storeIds);
+    final userId = _supabase.auth.currentUser?.id;
+    if (userId == null) return;
+    try {
+      final storeIds = widget.stores
+          .map((m) => _toMap(m['stores'])['id'] as String)
+          .toList();
+      final rows = await _supabase
+          .from('store_memberships')
+          .select('store_id, display_color')
+          .eq('user_id', userId)
+          .inFilter('store_id', storeIds);
 
-    debugPrint('=== rows: $rows ===');
+      final colorMap = <String, String?>{};
+      for (final r in rows) {
+        final m       = Map<String, dynamic>.from(r as Map);
+        final storeId = m['store_id'] as String;
+        colorMap[storeId] = m['display_color'] as String?;
+      }
 
-    final colorMap = <String, String?>{};
-    for (final r in rows) {
-      final m       = Map<String, dynamic>.from(r as Map);
-      final storeId = m['store_id'] as String;
-      colorMap[storeId] = m['display_color'] as String?;
-    }
-    debugPrint('=== colorMap: $colorMap ===');
-
-    if (mounted) {
-      setState(() {
-        for (var i = 0; i < widget.stores.length; i++) {
-          final store = _toMap(widget.stores[i]['stores']);
-          final id    = store['id'] as String;
-          final hex   = colorMap[id];
-          debugPrint('=== updating $id: hex=$hex ===');
-          if (hex != null && hex.isNotEmpty) {
-            _colorMap[id] = _hexToColor(hex);
-          } else {
-            _colorMap[id] =
-                _defaultStoreColors[i % _defaultStoreColors.length];
+      if (mounted) {
+        setState(() {
+          for (var i = 0; i < widget.stores.length; i++) {
+            final store = _toMap(widget.stores[i]['stores']);
+            final id    = store['id'] as String;
+            final hex   = colorMap[id];
+            if (hex != null && hex.isNotEmpty) {
+              _colorMap[id] = _hexToColor(hex);
+            } else {
+              _colorMap[id] =
+                  _defaultStoreColors[i % _defaultStoreColors.length];
+            }
           }
-        }
-      });
+        });
+      }
+    } catch (e) {
+      debugPrint('reloadColors error: $e');
     }
-  } catch (e) {
-    debugPrint('reloadColors error: $e');
   }
-}
 
   Map<String, dynamic> _toMap(dynamic v) {
     if (v == null) return {};
     if (v is Map<String, dynamic>) return v;
     return Map<String, dynamic>.from(v as Map);
+  }
+
+  bool _isPersonalStore(String storeId) {
+    return _personalStores.any((s) => s['id'] == storeId);
   }
 
   Future<void> _loadMyShifts() async {
@@ -143,6 +193,8 @@ class HomeCalendarScreenState extends State<HomeCalendarScreen> {
       for (final m in widget.stores) {
         final store   = _toMap(m['stores']);
         final storeId = store['id'] as String;
+        final role    = m['role'] as String? ?? 'staff';
+        if (role == 'personal') continue; // 個人追加職場はスキップ
         final raw = await _supabase
             .from('shifts')
             .select('date, start_time, end_time')
@@ -158,6 +210,7 @@ class HomeCalendarScreenState extends State<HomeCalendarScreen> {
     } catch (e) {
       debugPrint('loadMyShifts error: $e');
     } finally {
+      await _loadPersonalShifts();
       if (mounted) setState(() => _loading = false);
     }
   }
@@ -343,35 +396,126 @@ class HomeCalendarScreenState extends State<HomeCalendarScreen> {
     _loadMyShifts();
   }
 
+  // 全店舗リスト（管理者店舗＋個人追加職場）
+  List<MapEntry<String, String>> get _allStoreEntries {
+    final entries = <MapEntry<String, String>>[];
+    for (final m in widget.stores) {
+      final store = _toMap(m['stores']);
+      final id    = store['id'] as String;
+      entries.add(MapEntry(id, _nameMap[id] ?? ''));
+    }
+    for (final s in _personalStores) {
+      final id = s['id'] as String;
+      if (!entries.any((e) => e.key == id)) {
+        entries.add(MapEntry(id, _personalNameMap[id] ?? ''));
+      }
+    }
+    return entries;
+  }
+
+  Color _storeColor(String id) {
+    return _colorMap[id] ?? _personalColorMap[id] ?? Colors.grey;
+  }
+
+  // フィルター後のシフト数と時間を計算
+  int get _filteredShiftCount {
+    if (_selectedStoreId == null) {
+      int count = 0;
+      for (final shifts in _myShiftsByStore.values) {
+        count += shifts.length;
+      }
+      count += _personalShifts.length;
+      return count;
+    }
+    if (_isPersonalStore(_selectedStoreId!)) {
+      return _personalShifts
+          .where((s) => s['personal_store_id'] == _selectedStoreId)
+          .length;
+    }
+    return (_myShiftsByStore[_selectedStoreId] ?? []).length;
+  }
+
+  double get _filteredTotalHours {
+    List<Map<String, dynamic>> shifts = [];
+    if (_selectedStoreId == null) {
+      for (final s in _myShiftsByStore.values) shifts.addAll(s);
+      shifts.addAll(_personalShifts);
+    } else if (_isPersonalStore(_selectedStoreId!)) {
+      shifts = _personalShifts
+          .where((s) => s['personal_store_id'] == _selectedStoreId)
+          .toList();
+    } else {
+      shifts = _myShiftsByStore[_selectedStoreId] ?? [];
+    }
+
+    double total = 0;
+    for (final s in shifts) {
+      try {
+        final sp = (s['start_time'] as String).split(':');
+        final ep = (s['end_time']   as String).split(':');
+        final sm = int.parse(sp[0]) * 60 + int.parse(sp[1]);
+        var   em = int.parse(ep[0]) * 60 + int.parse(ep[1]);
+        if (em <= sm) em += 24 * 60;
+        total += (em - sm) / 60.0;
+      } catch (_) {}
+    }
+    return total;
+  }
+
   List<Widget> _buildMyChips(String dateStr) {
     final chips = <Widget>[];
+
+    // 管理者店舗のシフト
     for (final entry in _myShiftsByStore.entries) {
       final storeId = entry.key;
-      final shifts  = entry.value.where((s) => s['date'] == dateStr).toList();
+      if (_selectedStoreId != null && _selectedStoreId != storeId) continue;
+      final shifts = entry.value
+          .where((s) => s['date'] == dateStr).toList();
       if (shifts.isEmpty) continue;
-      final color = _colorMap[storeId] ?? Colors.grey;
+      final color = _storeColor(storeId);
       for (final s in shifts) {
         final startRaw = s['start_time'] as String?;
         final endRaw   = s['end_time']   as String?;
         final start    = startRaw != null ? startRaw.substring(0, 5) : '?';
         final endLabel = (endRaw == null || endRaw.startsWith('00:00'))
             ? 'ラスト' : endRaw.substring(0, 5);
-        chips.add(Container(
-          margin: const EdgeInsets.only(bottom: 2),
-          padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
-          decoration: BoxDecoration(
-            color: color.withOpacity(0.15),
-            borderRadius: BorderRadius.circular(3),
-            border: Border.all(color: color.withOpacity(0.5), width: 0.8),
-          ),
-          child: Text('$start〜$endLabel',
-              style: TextStyle(
-                  fontSize: 9, color: color, fontWeight: FontWeight.bold),
-              overflow: TextOverflow.ellipsis),
-        ));
+        chips.add(_buildChip('$start〜$endLabel', color));
       }
     }
+
+    // 個人追加職場のシフト
+    final personalForDate = _personalShifts
+        .where((s) => s['date'] == dateStr).toList();
+    for (final s in personalForDate) {
+      final storeId = s['personal_store_id'] as String?;
+      if (_selectedStoreId != null && _selectedStoreId != storeId) continue;
+      final color    = storeId != null
+          ? (_personalColorMap[storeId] ?? Colors.teal) : Colors.teal;
+      final startRaw = s['start_time'] as String?;
+      final endRaw   = s['end_time']   as String?;
+      final start    = startRaw != null ? startRaw.substring(0, 5) : '?';
+      final endLabel = (endRaw == null || endRaw.startsWith('00:00'))
+          ? 'ラスト' : endRaw.substring(0, 5);
+      chips.add(_buildChip('$start〜$endLabel', color));
+    }
+
     return chips;
+  }
+
+  Widget _buildChip(String label, Color color) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(3),
+        border: Border.all(color: color.withOpacity(0.5), width: 0.8),
+      ),
+      child: Text(label,
+          style: TextStyle(
+              fontSize: 9, color: color, fontWeight: FontWeight.bold),
+          overflow: TextOverflow.ellipsis),
+    );
   }
 
   @override
@@ -379,6 +523,8 @@ class HomeCalendarScreenState extends State<HomeCalendarScreen> {
     return Column(
       children: [
         _buildHeader(),
+        if (!widget.isAdmin) _buildStoreFilterTabs(),
+        if (!widget.isAdmin) _buildSummary(),
         _buildLegend(),
         _buildWeekdayRow(),
         SizedBox(
@@ -431,25 +577,152 @@ class HomeCalendarScreenState extends State<HomeCalendarScreen> {
     );
   }
 
+  // スタッフモード用の職場選択タブ
+  Widget _buildStoreFilterTabs() {
+    final allEntries = _allStoreEntries;
+    if (allEntries.isEmpty) return const SizedBox.shrink();
+    return Container(
+      color: Colors.white,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            // すべて
+            GestureDetector(
+              onTap: () => setState(() => _selectedStoreId = null),
+              child: Container(
+                margin: const EdgeInsets.only(right: 8),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: _selectedStoreId == null
+                      ? Colors.teal : Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text('すべて',
+                    style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: _selectedStoreId == null
+                            ? Colors.white : Colors.black54)),
+              ),
+            ),
+            // 各店舗
+            ...allEntries.map((entry) {
+              final id      = entry.key;
+              final name    = entry.value;
+              final color   = _storeColor(id);
+              final isSelected = _selectedStoreId == id;
+              return GestureDetector(
+                onTap: () => setState(() => _selectedStoreId = id),
+                child: Container(
+                  margin: const EdgeInsets.only(right: 8),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: isSelected ? color : Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(name,
+                      style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: isSelected
+                              ? Colors.white : Colors.black54)),
+                ),
+              );
+            }),
+            // 職場を追加
+            GestureDetector(
+              onTap: () async {
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const PersonalStoreScreen(),
+                  ),
+                );
+                await _loadMyShifts();
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: Colors.grey.shade300),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.add, size: 14, color: Colors.grey),
+                    SizedBox(width: 4),
+                    Text('職場を追加',
+                        style:
+                            TextStyle(fontSize: 12, color: Colors.grey)),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // スタッフモード用のサマリー
+  Widget _buildSummary() {
+    return Container(
+      color: Colors.white,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        children: [
+          Column(children: [
+            const Text('勤務日数',
+                style: TextStyle(fontSize: 11, color: Colors.grey)),
+            Text('${_filteredShiftCount}日',
+                style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.teal)),
+          ]),
+          Column(children: [
+            const Text('合計時間',
+                style: TextStyle(fontSize: 11, color: Colors.grey)),
+            Text('${_filteredTotalHours.toStringAsFixed(1)}h',
+                style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.teal)),
+          ]),
+        ],
+      ),
+    );
+  }
+
   Widget _buildLegend() {
-    if (widget.stores.length <= 1) return const SizedBox.shrink();
+    final allEntries = _allStoreEntries;
+    if (allEntries.length <= 1 && widget.isAdmin) {
+      return const SizedBox.shrink();
+    }
+    if (!widget.isAdmin) return const SizedBox.shrink();
     return Container(
       color: Colors.white,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
       child: Wrap(
         spacing: 12, runSpacing: 4,
-        children: widget.stores.map((m) {
-          final store = _toMap(m['stores']);
-          final id    = store['id'] as String;
-          final color = _colorMap[id] ?? Colors.grey;
-          final name  = _nameMap[id]  ?? '';
+        children: allEntries.map((entry) {
+          final id    = entry.key;
+          final name  = entry.value;
+          final color = _storeColor(id);
           return Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(
-                width: 10, height: 10,
-                decoration: BoxDecoration(
-                    color: color, borderRadius: BorderRadius.circular(2))),
+                  width: 10, height: 10,
+                  decoration: BoxDecoration(
+                      color: color,
+                      borderRadius: BorderRadius.circular(2))),
               const SizedBox(width: 4),
               Text(name, style: const TextStyle(fontSize: 11)),
             ],
@@ -543,8 +816,7 @@ class HomeCalendarScreenState extends State<HomeCalendarScreen> {
                   child: Text('$dayNum',
                       style: TextStyle(
                         fontSize: 11,
-                        fontWeight: isToday
-                            ? FontWeight.bold : FontWeight.normal,
+                        fontWeight: isToday ? FontWeight.bold : FontWeight.normal,
                         color: isToday ? Colors.white
                             : isSunday  ? const Color(0xFFE53935)
                             : isSaturday ? const Color(0xFF1565C0)
@@ -592,8 +864,7 @@ class HomeCalendarScreenState extends State<HomeCalendarScreen> {
       ),
       child: Row(
         children: [
-          const Icon(Icons.calendar_today,
-              size: 14, color: Color(0xFF2C7873)),
+          const Icon(Icons.calendar_today, size: 14, color: Color(0xFF2C7873)),
           const SizedBox(width: 6),
           Text(label,
               style: const TextStyle(
@@ -630,6 +901,11 @@ class HomeCalendarScreenState extends State<HomeCalendarScreen> {
   }
 
   Widget _buildStaffTimelinePanel(String dateStr) {
+    final allEntries = _allStoreEntries;
+    final filteredEntries = _selectedStoreId == null
+        ? allEntries
+        : allEntries.where((e) => e.key == _selectedStoreId).toList();
+
     return Container(
       color: Colors.white,
       child: Column(
@@ -639,15 +915,25 @@ class HomeCalendarScreenState extends State<HomeCalendarScreen> {
             child: SingleChildScrollView(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: widget.stores.map((m) {
-                  final store   = _toMap(m['stores']);
-                  final storeId = store['id'] as String;
-                  final color   = _colorMap[storeId] ?? Colors.grey;
-                  final name    = _nameMap[storeId]  ?? '';
+                children: filteredEntries.map((entry) {
+                  final storeId = entry.key;
+                  final name    = entry.value;
+                  final color   = _storeColor(storeId);
+                  final isPersonal = _isPersonalStore(storeId);
 
-                  final myShifts = (_myShiftsByStore[storeId] ?? [])
-                      .where((s) => s['date'] == dateStr)
-                      .toList();
+                  List<Map<String, dynamic>> myShifts;
+                  if (isPersonal) {
+                    myShifts = _personalShifts
+                        .where((s) =>
+                            s['date'] == dateStr &&
+                            s['personal_store_id'] == storeId)
+                        .toList();
+                  } else {
+                    myShifts = (_myShiftsByStore[storeId] ?? [])
+                        .where((s) => s['date'] == dateStr)
+                        .toList();
+                  }
+
                   final shiftLabel = myShifts.isEmpty
                       ? 'シフトなし'
                       : myShifts.map((s) {
@@ -657,8 +943,7 @@ class HomeCalendarScreenState extends State<HomeCalendarScreen> {
                               ? startRaw.substring(0, 5) : '?';
                           final end = (endRaw == null ||
                                   endRaw.startsWith('00:00'))
-                              ? 'ラスト'
-                              : endRaw.substring(0, 5);
+                              ? 'ラスト' : endRaw.substring(0, 5);
                           return '$start〜$end';
                         }).join(' / ');
 
@@ -668,14 +953,15 @@ class HomeCalendarScreenState extends State<HomeCalendarScreen> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       InkWell(
-                        onTap: () => _onStoreTap(storeId, dateStr),
+                        onTap: isPersonal
+                            ? null
+                            : () => _onStoreTap(storeId, dateStr),
                         child: Container(
                           padding: const EdgeInsets.symmetric(
                               horizontal: 16, vertical: 12),
                           decoration: BoxDecoration(
                             color: isExpanded
-                                ? color.withOpacity(0.08)
-                                : Colors.white,
+                                ? color.withOpacity(0.08) : Colors.white,
                             border: Border(
                               bottom: BorderSide(
                                   color: Colors.grey.shade200, width: 1),
@@ -700,21 +986,20 @@ class HomeCalendarScreenState extends State<HomeCalendarScreen> {
                                   style: TextStyle(
                                       fontSize: 13,
                                       color: myShifts.isEmpty
-                                          ? Colors.grey
-                                          : Colors.black87)),
-                              const SizedBox(width: 8),
-                              Icon(
-                                isExpanded
-                                    ? Icons.expand_less
-                                    : Icons.expand_more,
-                                color: Colors.grey,
-                                size: 18,
-                              ),
+                                          ? Colors.grey : Colors.black87)),
+                              if (!isPersonal) ...[
+                                const SizedBox(width: 8),
+                                Icon(
+                                  isExpanded
+                                      ? Icons.expand_less : Icons.expand_more,
+                                  color: Colors.grey, size: 18,
+                                ),
+                              ],
                             ],
                           ),
                         ),
                       ),
-                      if (isExpanded)
+                      if (isExpanded && !isPersonal)
                         Container(
                           color: const Color(0xFFF9FFFE),
                           child: _storeTimelineLoading
@@ -779,8 +1064,8 @@ class HomeCalendarScreenState extends State<HomeCalendarScreen> {
             ...widget.stores.map((m) {
               final store       = _toMap(m['stores']);
               final storeId     = store['id'] as String;
-              final color       = _colorMap[storeId] ?? Colors.grey;
-              final storeName   = _nameMap[storeId]  ?? '';
+              final color       = _storeColor(storeId);
+              final storeName   = _nameMap[storeId] ?? '';
               final storeShifts = allShifts
                   .where((s) => s['storeId'] == storeId).toList();
               return Column(
@@ -820,8 +1105,7 @@ class HomeCalendarScreenState extends State<HomeCalendarScreen> {
 
   Widget _buildGanttForStore(String storeId, String dateStr) {
     final list = (_timelineByStore[storeId] ?? {})[dateStr] ?? [];
-    final allShifts =
-        list.map((s) => {...s, 'storeId': storeId}).toList();
+    final allShifts = list.map((s) => {...s, 'storeId': storeId}).toList();
 
     if (allShifts.isEmpty) {
       return const Padding(
@@ -872,15 +1156,14 @@ class HomeCalendarScreenState extends State<HomeCalendarScreen> {
               return SizedBox(
                 width: hourWidth,
                 child: Text('${h % 24}:00',
-                    style: const TextStyle(
-                        fontSize: 9, color: Colors.grey),
+                    style: const TextStyle(fontSize: 9, color: Colors.grey),
                     textAlign: TextAlign.left),
               );
             }),
           ]),
           ...shifts.map((s) {
             final storeId  = s['storeId'] as String;
-            final color    = _colorMap[storeId] ?? const Color(0xFF2C7873);
+            final color    = _storeColor(storeId);
             final name     = s['name']  as String;
             final startStr = s['start'] as String;
             final endStr   = s['end']   as String;

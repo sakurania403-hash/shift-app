@@ -15,7 +15,6 @@ import 'staff_payroll_screen.dart';
 import 'staff_settings_screen.dart';
 import 'home_calendar_screen.dart';
 import 'personal_calendar_screen.dart';
-import 'personal_store_screen.dart';
 
 class MainScreen extends StatefulWidget {
   final String mode;
@@ -67,8 +66,35 @@ class _MainScreenState extends State<MainScreen> {
     try {
       final stores  = await _storeService.getMyStores();
       final isAdmin = stores.any((m) => m['role'] == 'admin');
+
+      List<Map<String, dynamic>> allStores = stores;
+      if (!isAdmin) {
+        try {
+          final userId = Supabase.instance.client.auth.currentUser?.id;
+          if (userId != null) {
+            final personalStores = await Supabase.instance.client
+                .from('personal_stores')
+                .select()
+                .eq('user_id', userId)
+                .order('sort_order');
+            final personalList =
+                (personalStores as List).map((s) => {
+                  'stores': {
+                    'id': s['id'],
+                    'name': s['name'],
+                  },
+                  'display_color': s['color'],
+                  'role': 'personal',
+                }).toList();
+            allStores = [...stores, ...personalList];
+          }
+        } catch (e) {
+          debugPrint('loadPersonalStores error: $e');
+        }
+      }
+
       setState(() {
-        _stores    = stores;
+        _stores    = allStores;
         _isAdmin   = isAdmin;
         _isLoading = false;
         _screens   = null;

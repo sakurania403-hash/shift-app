@@ -2,6 +2,7 @@
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/store_settings_service.dart';
+import 'personal_store_screen.dart';
 
 final _supabase = Supabase.instance.client;
 
@@ -180,6 +181,22 @@ class StaffSettingsScreenState extends State<StaffSettingsScreen> {
                   if (i < widget.stores.length - 1)
                     const Divider(height: 1, indent: 16),
                 ],
+                const Divider(height: 1, indent: 16),
+                ListTile(
+                  leading: const Icon(Icons.add_circle_outline,
+                      color: Color(0xFF2C7873), size: 22),
+                  title: const Text('職場を追加',
+                      style: TextStyle(
+                          fontSize: 15, color: Color(0xFF2C7873))),
+                  onTap: () async {
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const PersonalStoreScreen(),
+                      ),
+                    );
+                  },
+                ),
               ],
             ),
           ),
