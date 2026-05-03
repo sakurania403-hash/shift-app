@@ -25,7 +25,7 @@ class _InviteScreenState extends State<InviteScreen> {
     if (uri.host == 'localhost' || uri.host == '127.0.0.1') {
       return '${uri.scheme}://${uri.host}:${uri.port}';
     }
-    return 'https://shift-app.web.app';
+    return 'https://shift-app-4171c.web.app';
   }
 
   // 招待URL: /#/join?invite=xxx 形式
