@@ -57,10 +57,10 @@ Color _hexToColor(String hex) {
 
 // ─── 給料内訳 ──────────────────────────────────────────────────
 class _WageBreakdown {
-  final int baseWage;       // 平日給料
-  final int holidayWage;    // 休日給料（休日時給設定あり時のみ）
-  final int lateNightWage;  // 深夜給料
-  final int commuteFee;     // 交通費
+  final int baseWage;
+  final int holidayWage;
+  final int lateNightWage;
+  final int commuteFee;
   _WageBreakdown({
     required this.baseWage,
     required this.holidayWage,
@@ -138,7 +138,7 @@ class _StoreData {
   String       holidayClose  = '22:00';
 
   int       commuteFee      = 0;
-  int       holidayWageRate = 0;   // 0 = 未設定（基本時給を使う）
+  int       holidayWageRate = 0;
   List<int> holidayWeekdays = [];
   int       lateNightWage   = 0;
   String    lateNightStart  = '22:00';
@@ -165,7 +165,6 @@ class _StoreData {
 
   void dispose() => actualCtrl.dispose();
 
-  /// 休日時給が設定されているか（= 平日と異なる給料体系か）
   bool get hasHolidayWageRate => holidayWageRate > 0;
 
   _PayPeriod calcPayPeriod(int year, int month) {
@@ -219,9 +218,6 @@ class _StoreData {
     }
   }
 
-  /// 給料内訳を計算
-  /// ・休日時給未設定 → 休日も基本時給で計算。内訳は「基本給料」にまとめる
-  /// ・休日時給設定済 → 平日は基本時給、休日は休日時給で分けて表示
   _WageBreakdown dailyBreakdown(int i) {
     final shift = shifts[i];
     final wMin  = workedMinutes(i);
@@ -230,14 +226,11 @@ class _StoreData {
     int holiday = 0;
 
     if (shift.isHoliday && hasHolidayWageRate) {
-      // 休日時給設定あり → 休日給料として計上
       holiday = (holidayWageRate * wMin / 60).floor();
     } else {
-      // 休日時給未設定 or 平日 → 基本時給で計算
       base = (hourlyWage * wMin / 60).floor();
     }
 
-    // 深夜給料
     int lateNight = 0;
     if (lateNightWage > 0 && lateNightStart.isNotEmpty && lateNightEnd.isNotEmpty) {
       final lnMin = shift.lateNightMinutes(lateNightStart, lateNightEnd);
@@ -263,18 +256,15 @@ class _StoreData {
     return total;
   }
 
-  // 基本給料の集計（平日 + 休日時給未設定の休日）
   int get totalBaseMinutes => List.generate(shifts.length, (i) {
     if (shifts[i].isHoliday && hasHolidayWageRate) return 0;
     return workedMinutes(i);
   }).fold(0, (a, b) => a + b);
   int get totalBaseWage    => List.generate(shifts.length, (i) => dailyBreakdown(i).baseWage).fold(0, (a, b) => a + b);
 
-  // 休日給料の集計（休日時給設定あり時のみ）
   int get holidayMinutes   => List.generate(shifts.length, (i) => (shifts[i].isHoliday && hasHolidayWageRate) ? workedMinutes(i) : 0).fold(0, (a, b) => a + b);
   int get totalHolidayWage => List.generate(shifts.length, (i) => dailyBreakdown(i).holidayWage).fold(0, (a, b) => a + b);
 
-  // 深夜・交通費
   int get totalLateNightMinutes => shifts.fold(0, (a, s) => a + s.lateNightMinutes(lateNightStart, lateNightEnd));
   int get totalLateNight        => List.generate(shifts.length, (i) => dailyBreakdown(i).lateNightWage).fold(0, (a, b) => a + b);
   int get totalCommute          => List.generate(shifts.length, (i) => dailyBreakdown(i).commuteFee).fold(0, (a, b) => a + b);
@@ -477,7 +467,6 @@ class StaffPayrollScreenState extends State<StaffPayrollScreen> {
 
       List<Map<String, dynamic>> raw;
 
-      // 個人モード（personal_storesのIDを使用）
       final isPersonal = await _isPersonalStore(d.storeId);
       if (isPersonal) {
         final data = await _supabase
@@ -507,9 +496,17 @@ class StaffPayrollScreenState extends State<StaffPayrollScreen> {
         final startRaw = mm['start_time'] as String?;
         final endRaw   = mm['end_time']   as String?;
         final start    = startRaw != null ? startRaw.substring(0, 5) : '09:00';
-        final end      = endRaw   != null ? endRaw.substring(0, 5)   : '00:00';
         final isJpHol   = StoreSettingsService.isHoliday(date, holidays);
         final isHoliday = isJpHol || d.holidayWeekdays.contains(date.weekday % 7);
+
+        // ラスト（end_time=NULL）は終業時間で代替
+        final String end;
+        if (endRaw == null) {
+          end = isHoliday ? d.holidayClose : d.weekdayClose;
+        } else {
+          end = endRaw.substring(0, 5);
+        }
+
         records.add(_ShiftRecord(
           date:      date,
           startTime: start,
@@ -751,7 +748,6 @@ class StaffPayrollScreenState extends State<StaffPayrollScreen> {
             ],
           ),
         ),
-
         ...(_storeData.map((d) => _buildStoreCard(d))),
         const SizedBox(height: 24),
       ],
@@ -951,7 +947,6 @@ class StaffPayrollScreenState extends State<StaffPayrollScreen> {
                   const Divider(height: 1),
                   const SizedBox(height: 4),
 
-                  // 基本給料（平日 + 休日時給未設定の休日をまとめて表示）
                   if (hasBase)
                     _breakdownDetailRow(
                       label:    '基本給料',
@@ -961,7 +956,6 @@ class StaffPayrollScreenState extends State<StaffPayrollScreen> {
                       color:    d.displayColor,
                     ),
 
-                  // 休日給料（休日時給設定あり時のみ表示）
                   if (hasHoliday)
                     _breakdownDetailRow(
                       label:    '休日給料',

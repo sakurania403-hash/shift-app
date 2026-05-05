@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../services/store_settings_service.dart';
 import 'personal_store_screen.dart';
 
 final _supabase = Supabase.instance.client;
@@ -43,7 +44,7 @@ class HomeCalendarScreenState extends State<HomeCalendarScreen> {
   bool _timelineLoading = false;
   String? _expandedStoreId;
   bool _storeTimelineLoading = false;
-  String? _selectedStoreId; // 職場フィルター
+  String? _selectedStoreId;
 
   late Map<String, Color>  _colorMap;
   late Map<String, String> _nameMap;
@@ -53,6 +54,10 @@ class HomeCalendarScreenState extends State<HomeCalendarScreen> {
   Map<String, Color> _personalColorMap = {};
   Map<String, String> _personalNameMap = {};
   List<Map<String, dynamic>> _personalShifts = [];
+
+  // 終業時間マップ（storeId → 時間文字列）
+  Map<String, String> _weekdayCloseMap = {};
+  Map<String, String> _holidayCloseMap = {};
 
   @override
   void initState() {
@@ -73,7 +78,7 @@ class HomeCalendarScreenState extends State<HomeCalendarScreen> {
       final id      = store['id'] as String;
       _nameMap[id]  = store['name'] as String? ?? '';
       final role    = m['role'] as String? ?? 'staff';
-      if (role == 'personal') continue; // 個人追加職場はスキップ
+      if (role == 'personal') continue;
       final displayColorHex = m['display_color'] as String?;
       if (displayColorHex != null && displayColorHex.isNotEmpty) {
         _colorMap[id] = _hexToColor(displayColorHex);
@@ -195,12 +200,40 @@ class HomeCalendarScreenState extends State<HomeCalendarScreen> {
           .toIso8601String().substring(0, 10);
       final toStr = DateTime(_year, _month + 1, 0)
           .toIso8601String().substring(0, 10);
+
+      // 終業時間設定を取得
+      try {
+        final storeIds = widget.stores
+            .where((m) => (m['role'] as String? ?? 'staff') != 'personal')
+            .map((m) => _toMap(m['stores'])['id'] as String)
+            .toList();
+        if (storeIds.isNotEmpty) {
+          final settings = await _supabase
+              .from('staff_payroll_settings')
+              .select('store_id, weekday_close, holiday_close')
+              .eq('user_id', userId)
+              .inFilter('store_id', storeIds);
+          final weekdayMap = <String, String>{};
+          final holidayMap = <String, String>{};
+          for (final s in settings) {
+            final sm  = Map<String, dynamic>.from(s as Map);
+            final sid = sm['store_id'] as String;
+            weekdayMap[sid] = sm['weekday_close'] as String? ?? '22:00';
+            holidayMap[sid] = sm['holiday_close'] as String? ?? '22:00';
+          }
+          _weekdayCloseMap = weekdayMap;
+          _holidayCloseMap = holidayMap;
+        }
+      } catch (e) {
+        debugPrint('loadCloseSettings error: $e');
+      }
+
       final newMap = <String, List<Map<String, dynamic>>>{};
       for (final m in widget.stores) {
         final store   = _toMap(m['stores']);
         final storeId = store['id'] as String;
         final role    = m['role'] as String? ?? 'staff';
-        if (role == 'personal') continue; // 個人追加職場はスキップ
+        if (role == 'personal') continue;
         final raw = await _supabase
             .from('shifts')
             .select('date, start_time, end_time')
@@ -402,7 +435,6 @@ class HomeCalendarScreenState extends State<HomeCalendarScreen> {
     _loadMyShifts();
   }
 
-  // 全店舗リスト（管理者店舗＋個人追加職場）
   List<MapEntry<String, String>> get _allStoreEntries {
     final entries = <MapEntry<String, String>>[];
     for (final m in widget.stores) {
@@ -423,7 +455,6 @@ class HomeCalendarScreenState extends State<HomeCalendarScreen> {
     return _colorMap[id] ?? _personalColorMap[id] ?? Colors.grey;
   }
 
-  // フィルター後のシフト数と時間を計算
   int get _filteredShiftCount {
     if (_selectedStoreId == null) {
       int count = 0;
@@ -441,37 +472,79 @@ class HomeCalendarScreenState extends State<HomeCalendarScreen> {
     return (_myShiftsByStore[_selectedStoreId] ?? []).length;
   }
 
+  // ラスト（end_time=NULL or 00:00始まり）を終業時間に変換して合計時間を計算
   double get _filteredTotalHours {
-    List<Map<String, dynamic>> shifts = [];
-    if (_selectedStoreId == null) {
-      for (final s in _myShiftsByStore.values) shifts.addAll(s);
-      shifts.addAll(_personalShifts);
-    } else if (_isPersonalStore(_selectedStoreId!)) {
-      shifts = _personalShifts
-          .where((s) => s['personal_store_id'] == _selectedStoreId)
-          .toList();
-    } else {
-      shifts = _myShiftsByStore[_selectedStoreId] ?? [];
+    double total = 0;
+
+    // 店舗シフト
+    final storeEntries = _selectedStoreId == null
+        ? _myShiftsByStore.entries.toList()
+        : _myShiftsByStore.entries
+            .where((e) => e.key == _selectedStoreId)
+            .toList();
+
+    for (final entry in storeEntries) {
+      final storeId = entry.key;
+      for (final s in entry.value) {
+        try {
+          final startRaw = s['start_time'] as String?;
+          final endRaw   = s['end_time']   as String?;
+          if (startRaw == null) continue;
+
+          final sp = startRaw.substring(0, 5).split(':');
+          final sm = int.parse(sp[0]) * 60 + int.parse(sp[1]);
+
+          // ラスト判定：end_timeがNULLまたは00:00始まり
+          final isLast = endRaw == null || endRaw.startsWith('00:00');
+          final String endStr;
+          if (isLast) {
+            endStr = _weekdayCloseMap[storeId] ?? '22:00';
+          } else {
+            endStr = endRaw!.substring(0, 5);
+          }
+
+          final ep = endStr.split(':');
+          var em = int.parse(ep[0]) * 60 + int.parse(ep[1]);
+          if (em <= sm) em += 24 * 60;
+          total += (em - sm) / 60.0;
+        } catch (_) {}
+      }
     }
 
-    double total = 0;
-    for (final s in shifts) {
-      try {
-        final sp = (s['start_time'] as String).split(':');
-        final ep = (s['end_time']   as String).split(':');
-        final sm = int.parse(sp[0]) * 60 + int.parse(sp[1]);
-        var   em = int.parse(ep[0]) * 60 + int.parse(ep[1]);
-        if (em <= sm) em += 24 * 60;
-        total += (em - sm) / 60.0;
-      } catch (_) {}
+    // 個人追加職場シフト
+    if (_selectedStoreId == null || _isPersonalStore(_selectedStoreId!)) {
+      final personalShifts = _selectedStoreId == null
+          ? _personalShifts
+          : _personalShifts
+              .where((s) => s['personal_store_id'] == _selectedStoreId)
+              .toList();
+
+      for (final s in personalShifts) {
+        try {
+          final startRaw = s['start_time'] as String?;
+          final endRaw   = s['end_time']   as String?;
+          if (startRaw == null) continue;
+
+          final sp = startRaw.substring(0, 5).split(':');
+          final sm = int.parse(sp[0]) * 60 + int.parse(sp[1]);
+
+          final isLast = endRaw == null || endRaw.startsWith('00:00');
+          final String endStr = isLast ? '22:00' : endRaw!.substring(0, 5);
+
+          final ep = endStr.split(':');
+          var em = int.parse(ep[0]) * 60 + int.parse(ep[1]);
+          if (em <= sm) em += 24 * 60;
+          total += (em - sm) / 60.0;
+        } catch (_) {}
+      }
     }
+
     return total;
   }
 
   List<Widget> _buildMyChips(String dateStr) {
     final chips = <Widget>[];
 
-    // 管理者店舗のシフト
     for (final entry in _myShiftsByStore.entries) {
       final storeId = entry.key;
       if (_selectedStoreId != null && _selectedStoreId != storeId) continue;
@@ -489,7 +562,6 @@ class HomeCalendarScreenState extends State<HomeCalendarScreen> {
       }
     }
 
-    // 個人追加職場のシフト
     final personalForDate = _personalShifts
         .where((s) => s['date'] == dateStr).toList();
     for (final s in personalForDate) {
@@ -583,7 +655,6 @@ class HomeCalendarScreenState extends State<HomeCalendarScreen> {
     );
   }
 
-  // スタッフモード用の職場選択タブ
   Widget _buildStoreFilterTabs() {
     final allEntries = _allStoreEntries;
     if (allEntries.isEmpty) return const SizedBox.shrink();
@@ -594,7 +665,6 @@ class HomeCalendarScreenState extends State<HomeCalendarScreen> {
         scrollDirection: Axis.horizontal,
         child: Row(
           children: [
-            // すべて
             GestureDetector(
               onTap: () => setState(() => _selectedStoreId = null),
               child: Container(
@@ -614,9 +684,8 @@ class HomeCalendarScreenState extends State<HomeCalendarScreen> {
                             ? Colors.white : Colors.black54)),
               ),
             ),
-            // 各店舗
             ...allEntries
-                .where((entry) => entry.value.isNotEmpty) // 名前が空のものを除外
+                .where((entry) => entry.value.isNotEmpty)
                 .map((entry) {
               final id      = entry.key;
               final name    = entry.value;
@@ -641,7 +710,6 @@ class HomeCalendarScreenState extends State<HomeCalendarScreen> {
                 ),
               );
             }),
-            // 職場を追加
             GestureDetector(
               onTap: () async {
                 await Navigator.push(
@@ -677,7 +745,6 @@ class HomeCalendarScreenState extends State<HomeCalendarScreen> {
     );
   }
 
-  // スタッフモード用のサマリー
   Widget _buildSummary() {
     return Container(
       color: Colors.white,

@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../services/store_settings_service.dart';
 import '../services/shift_service.dart';
-import '../services/notification_service.dart';
 import '../services/member_service.dart';
 
 class ShiftTimelineScreen extends StatefulWidget {
@@ -32,10 +31,9 @@ class ShiftTimelineScreen extends StatefulWidget {
 }
 
 class _ShiftTimelineScreenState extends State<ShiftTimelineScreen> {
-  final _settingsService     = StoreSettingsService();
-  final _shiftService        = ShiftService();
-  final _notificationService = NotificationService();
-  final _memberService       = MemberService();
+  final _settingsService    = StoreSettingsService();
+  final _shiftService       = ShiftService();
+  final _memberService      = MemberService();
 
   List<Map<String, dynamic>> _workHours      = [];
   List<Map<String, dynamic>> _staffingSlots  = [];
@@ -73,7 +71,6 @@ class _ShiftTimelineScreenState extends State<ShiftTimelineScreen> {
         .where((s) => s['staff_type'] != 'temp' && s['date'] == dateStr)
         .toList();
 
-    
     setState(() {
       _workHours      = workHours;
       _staffingSlots  = staffingSlots;
@@ -341,21 +338,6 @@ class _ShiftTimelineScreenState extends State<ShiftTimelineScreen> {
                             : endController.text.trim(),
                     isLast: isLast,
                   );
-
-                  // ── シフト確定通知：該当スタッフへ送信 ──
-                  try {
-                    final start = startController.text.trim();
-                    final end   = isLast ? 'ラスト' : endController.text.trim();
-                    final dateLabel = DateFormat('M/d(E)', 'ja').format(_currentDate);
-                    await _notificationService.sendShiftConfirmed(
-                    storeId:         widget.storeId,
-                    recipientUserId: userId,
-                    storeName:       widget.storeName,
-                    periodLabel:     '$dateLabel $start〜$end',
-                  );
-                  } catch (_) {
-                    // 通知失敗はサイレントに無視
-                  }
                 } else {
                   if (confirmed != null) {
                     await _shiftService.deleteShift(

@@ -109,22 +109,24 @@ class NotificationService {
 
   // ---- 通知送信メソッド ----
 
-  // シフト確定通知（管理者→スタッフ1人）
-  Future<void> sendShiftConfirmed({
+  // シフト確定一括通知（管理者→全スタッフ）
+  Future<void> sendShiftConfirmedBulk({
     required String storeId,
-    required String recipientUserId,
+    required List<String> recipientUserIds,
     required String storeName,
-    required String periodLabel, // 例: "5/1〜5/15"
-    String? submissionId,
+    required String shiftTitle, // 募集タイトル 例: "6月シフト"
+    String? recruitmentId,
   }) async {
-    await _send(
-      storeId: storeId,
-      recipientUserId: recipientUserId,
-      type: 'shift_confirmed',
-      title: 'シフトが確定しました',
-      body: '$storeName のシフト（$periodLabel）が確定しました。確認してください。',
-      relatedId: submissionId,
-    );
+    for (final uid in recipientUserIds) {
+      await _send(
+        storeId: storeId,
+        recipientUserId: uid,
+        type: 'shift_confirmed',
+        title: 'シフトが確定しました',
+        body: '$storeName $shiftTitle のシフトが確定しました。確認してください。',
+        relatedId: recruitmentId,
+      );
+    }
   }
 
   // 募集開始通知（管理者→店舗の全スタッフ）
@@ -132,7 +134,7 @@ class NotificationService {
     required String storeId,
     required List<String> recipientUserIds,
     required String storeName,
-    required String periodLabel, // 例: "5/1〜5/15"
+    required String periodLabel,
     String? recruitmentId,
   }) async {
     for (final uid in recipientUserIds) {
@@ -150,7 +152,7 @@ class NotificationService {
   // 希望シフト提出通知（スタッフ→管理者）
   Future<void> sendShiftRequestSubmitted({
     required String storeId,
-    required String recipientUserId, // 管理者のuser_id
+    required String recipientUserId,
     required String staffName,
     required String storeName,
     required String periodLabel,

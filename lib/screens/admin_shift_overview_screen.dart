@@ -1,12 +1,9 @@
-import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
-import 'dart:ui' as ui;
 import 'package:intl/intl.dart';
 import '../services/admin_shift_service.dart';
 import '../services/member_service.dart';
-import '../utils/web_download.dart';
+import '../services/notification_service.dart';
 import 'shift_timeline_screen.dart';
 
 class AdminShiftOverviewScreen extends StatefulWidget {
@@ -30,7 +27,7 @@ class _AdminShiftOverviewScreenState
     extends State<AdminShiftOverviewScreen> {
   final _service = AdminShiftService();
   final _memberService = MemberService();
-  final _repaintKey = GlobalKey();
+  final _notificationService = NotificationService();
 
   List<Map<String, dynamic>> _staff = [];
   Map<String, Map<String, dynamic>> _shiftRequests = {};
@@ -44,7 +41,6 @@ class _AdminShiftOverviewScreenState
   late DateTime _workStart;
   late DateTime _workEnd;
 
-  // 募集が open かどうか（再募集中は希望を優先表示）
   bool get _isOpen => widget.recruitment['status'] == 'open';
 
   @override
@@ -165,9 +161,6 @@ class _AdminShiftOverviewScreenState
     return count;
   }
 
-  // ─── セルテキスト ────────────────────────────────────────────
-  // open（再募集中）の場合：希望シフト → 確定シフト の優先順
-  // closed（締切）の場合：確定シフト → 希望シフト の優先順（従来通り）
   String _getCellText(String userId, String dateStr) {
     final confirmedKey = '${userId}_$dateStr';
     final hasConfirmed = _confirmedShifts.containsKey(confirmedKey);
@@ -175,7 +168,6 @@ class _AdminShiftOverviewScreenState
     final hasDayOff = _dayOffRequests.containsKey('${userId}_$dateStr');
 
     if (_isOpen) {
-      // 再募集中：希望シフトを優先表示
       if (hasDayOff) return '休';
       if (shift != null) {
         final start =
@@ -188,7 +180,6 @@ class _AdminShiftOverviewScreenState
         if (start.isEmpty) return '○';
         return '$start\n~$end';
       }
-      // 希望がなければ確定シフトを表示
       if (hasConfirmed) {
         final c = _confirmedShifts[confirmedKey]!;
         final start =
@@ -199,7 +190,6 @@ class _AdminShiftOverviewScreenState
       }
       return '';
     } else {
-      // 締切済み：確定シフトを優先表示（従来通り）
       if (hasConfirmed) {
         final c = _confirmedShifts[confirmedKey]!;
         final start =
@@ -211,8 +201,7 @@ class _AdminShiftOverviewScreenState
       if (hasDayOff) return '休';
       if (shift != null) {
         final start =
-            shift['preferred_start']?.toString().substring(0, 5) ??
-                '';
+            shift['preferred_start']?.toString().substring(0, 5) ?? '';
         if (shift['is_last'] == true) {
           return start.isEmpty ? 'L' : '$start\n~L';
         }
@@ -225,7 +214,6 @@ class _AdminShiftOverviewScreenState
     }
   }
 
-  // ─── セル背景色 ──────────────────────────────────────────────
   Color _getCellColor(String userId, String dateStr) {
     final hasConfirmed = _isConfirmed(userId, dateStr);
     final key = '${userId}_$dateStr';
@@ -233,14 +221,11 @@ class _AdminShiftOverviewScreenState
     final hasShift = _shiftRequests.containsKey(key);
 
     if (_isOpen) {
-      // 再募集中：希望シフトを優先
       if (hasDayOff) return Colors.red[50]!;
       if (hasShift) return Colors.teal[50]!;
-      // 希望がなければ確定シフトの色
-      if (hasConfirmed) return Colors.teal[200]!; // 薄めの確定色
+      if (hasConfirmed) return Colors.teal[200]!;
       return Colors.white;
     } else {
-      // 締切済み：確定シフトを優先
       if (hasConfirmed) return Colors.teal[500]!;
       if (hasDayOff) return Colors.red[50]!;
       if (hasShift) return Colors.teal[50]!;
@@ -248,7 +233,6 @@ class _AdminShiftOverviewScreenState
     }
   }
 
-  // ─── セル文字色 ──────────────────────────────────────────────
   Color _getCellTextColor(String userId, String dateStr) {
     final hasConfirmed = _isConfirmed(userId, dateStr);
     final key = '${userId}_$dateStr';
@@ -281,42 +265,66 @@ class _AdminShiftOverviewScreenState
     return count;
   }
 
-  Future<void> _shareShift() async {
+  Future<void> _confirmShift() async {
+    // 確定済みシフトがあるか確認
+    if (_confirmedShifts.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('確定済みのシフトがありません')),
+        );
+      }
+      return;
+    }
+
+    // 確認ダイアログ
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('シフトを確定しますか？'),
+        content: Text(
+          '${widget.storeName} ${widget.recruitment['title']} のシフトが確定した旨を全スタッフに通知します。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('キャンセル'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.teal,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('通知する'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
     setState(() => _isSaving = true);
     try {
-      final boundary = _repaintKey.currentContext
-          ?.findRenderObject() as RenderRepaintBoundary?;
-      if (boundary == null) return;
+      // 全スタッフのuser_idを取得
+      final recipientUserIds = _staff
+          .map((m) => (m['user_profiles'] as Map<String, dynamic>)['id'] as String)
+          .toList();
 
-      final image = await boundary.toImage(pixelRatio: 2.0);
-      final byteData =
-          await image.toByteData(format: ui.ImageByteFormat.png);
-      if (byteData == null) return;
+      await _notificationService.sendShiftConfirmedBulk(
+        storeId: widget.storeId,
+        recipientUserIds: recipientUserIds,
+        storeName: widget.storeName,
+        shiftTitle: widget.recruitment['title'] ?? '',
+        recruitmentId: widget.recruitment['id'],
+      );
 
-      final bytes = byteData.buffer.asUint8List();
-      final base64str = base64Encode(bytes);
-      final dataUrl = 'data:image/png;base64,$base64str';
-      final title = widget.recruitment['title'] ?? 'shift';
-
-      if (kIsWeb) {
-        webDownload(dataUrl, '$title.png');
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('シフト表を画像としてダウンロードしました'),
-              backgroundColor: Colors.teal,
-            ),
-          );
-        }
-      } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('シフト表の共有はWeb版でご利用ください'),
-              backgroundColor: Colors.teal,
-            ),
-          );
-        }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('全スタッフにシフト確定通知を送信しました'),
+            backgroundColor: Colors.teal,
+          ),
+        );
       }
     } catch (e) {
       if (mounted) {
@@ -454,7 +462,7 @@ class _AdminShiftOverviewScreenState
                       ),
                       const SizedBox(width: 8),
                       ElevatedButton.icon(
-                        onPressed: _isSaving ? null : _shareShift,
+                        onPressed: _isSaving ? null : _confirmShift,
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.teal,
                           foregroundColor: Colors.white,
@@ -468,8 +476,8 @@ class _AdminShiftOverviewScreenState
                                   color: Colors.white,
                                 ),
                               )
-                            : const Icon(Icons.download, size: 16),
-                        label: const Text('シフト共有',
+                            : const Icon(Icons.check_circle_outline, size: 16),
+                        label: const Text('シフト確定',
                             style: TextStyle(fontSize: 13)),
                       ),
                     ],
@@ -478,371 +486,299 @@ class _AdminShiftOverviewScreenState
                 Expanded(
                   child: _staff.isEmpty
                       ? const Center(child: Text('スタッフがいません'))
-                      : RepaintBoundary(
-                          key: _repaintKey,
-                          child: Container(
-                            color: Colors.white,
+                      : Container(
+                          color: Colors.white,
+                          child: SingleChildScrollView(
+                            scrollDirection: Axis.vertical,
                             child: SingleChildScrollView(
-                              scrollDirection: Axis.vertical,
-                              child: SingleChildScrollView(
-                                scrollDirection: Axis.horizontal,
-                                child: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
+                              scrollDirection: Axis.horizontal,
+                              child: Column(
+                                crossAxisAlignment:
+                                    CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      _headerCell(
+                                          'スタッフ', 70, 68),
+                                      ...dates.map((date) {
+                                        final weekday =
+                                            date.weekday;
+                                        final isSunday = weekday ==
+                                            DateTime.sunday;
+                                        final isSaturday =
+                                            weekday ==
+                                                DateTime.saturday;
+                                        final dateStr = date
+                                            .toIso8601String()
+                                            .substring(0, 10);
+                                        final confirmedCnt =
+                                            _confirmedCount(
+                                                dateStr);
+
+                                        return GestureDetector(
+                                          onTap: () {
+                                            Navigator.push(
+                                              context,
+                                              MaterialPageRoute(
+                                                builder: (_) => ShiftTimelineScreen(
+                                                  date: date,
+                                                  storeId: widget.storeId,
+                                                  storeName: widget.storeName,
+                                                  confirmedShifts: _confirmedShifts.values.toList(),
+                                                  staff: _staff,
+                                                  shiftRequests: _shiftRequests.values.toList(),
+                                                  dayOffRequests: _dayOffRequests.values.toList(),
+                                                  allDates: dates,
+                                                ),
+                                              ),
+                                            ).then((_) => _loadData());
+                                          },
+                                          child: Container(
+                                            width: 62,
+                                            height: 68,
+                                            decoration: BoxDecoration(
+                                              color: isSunday
+                                                  ? Colors.red[50]
+                                                  : isSaturday
+                                                      ? Colors.blue[50]
+                                                      : Colors.grey[100],
+                                              border: Border.all(
+                                                  color: Colors.grey[300]!,
+                                                  width: 0.5),
+                                            ),
+                                            alignment: Alignment.center,
+                                            child: Column(
+                                              mainAxisAlignment:
+                                                  MainAxisAlignment.center,
+                                              children: [
+                                                Text(
+                                                  fmt.format(date),
+                                                  style: TextStyle(
+                                                    fontSize: 10,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: isSunday
+                                                        ? Colors.red
+                                                        : isSaturday
+                                                            ? Colors.blue
+                                                            : Colors.black87,
+                                                  ),
+                                                ),
+                                                Text(
+                                                  fmtDay.format(date),
+                                                  style: TextStyle(
+                                                    fontSize: 9,
+                                                    color: isSunday
+                                                        ? Colors.red
+                                                        : isSaturday
+                                                            ? Colors.blue
+                                                            : Colors.grey[600],
+                                                  ),
+                                                ),
+                                                const SizedBox(height: 4),
+                                                Container(
+                                                  padding: const EdgeInsets.symmetric(
+                                                      horizontal: 4, vertical: 2),
+                                                  decoration: BoxDecoration(
+                                                    color: confirmedCnt > 0
+                                                        ? Colors.teal[600]
+                                                        : Colors.grey[500],
+                                                    borderRadius:
+                                                        BorderRadius.circular(4),
+                                                  ),
+                                                  child: Row(
+                                                    mainAxisSize: MainAxisSize.min,
+                                                    children: [
+                                                      const Icon(Icons.people,
+                                                          size: 8,
+                                                          color: Colors.white),
+                                                      const SizedBox(width: 2),
+                                                      Text(
+                                                        confirmedCnt > 0
+                                                            ? '$confirmedCnt人確定'
+                                                            : '人員確認',
+                                                        style: const TextStyle(
+                                                          fontSize: 7,
+                                                          color: Colors.white,
+                                                          fontWeight: FontWeight.bold,
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        );
+                                      }),
+                                    ],
+                                  ),
+                                  ..._staff.map((m) {
+                                    final profile =
+                                        m['user_profiles'] as Map<String, dynamic>;
+                                    final userId = profile['id'] as String;
+                                    final name = profile['name'] as String;
+
+                                    return Row(
                                       children: [
-                                        _headerCell(
-                                            'スタッフ', 70, 68),
+                                        Container(
+                                          width: 70,
+                                          height: 52,
+                                          decoration: BoxDecoration(
+                                            color: Colors.teal[50],
+                                            border: Border.all(
+                                                color: Colors.grey[300]!,
+                                                width: 0.5),
+                                          ),
+                                          alignment: Alignment.center,
+                                          padding: const EdgeInsets.all(4),
+                                          child: Text(
+                                            name,
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w500,
+                                              color: Colors.teal[800],
+                                            ),
+                                            textAlign: TextAlign.center,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
                                         ...dates.map((date) {
-                                          final weekday =
-                                              date.weekday;
-                                          final isSunday = weekday ==
-                                              DateTime.sunday;
-                                          final isSaturday =
-                                              weekday ==
-                                                  DateTime.saturday;
                                           final dateStr = date
                                               .toIso8601String()
                                               .substring(0, 10);
-                                          final confirmedCnt =
-                                              _confirmedCount(
-                                                  dateStr);
+                                          return Container(
+                                            width: 62,
+                                            height: 52,
+                                            decoration: BoxDecoration(
+                                              color: _getCellColor(userId, dateStr),
+                                              border: Border.all(
+                                                  color: Colors.grey[200]!,
+                                                  width: 0.5),
+                                            ),
+                                            alignment: Alignment.center,
+                                            child: Text(
+                                              _getCellText(userId, dateStr),
+                                              style: TextStyle(
+                                                fontSize: 8,
+                                                color: _getCellTextColor(
+                                                    userId, dateStr),
+                                                fontWeight: FontWeight.w500,
+                                              ),
+                                              textAlign: TextAlign.center,
+                                            ),
+                                          );
+                                        }),
+                                      ],
+                                    );
+                                  }),
+                                  if (_tempRows.isNotEmpty)
+                                    Container(
+                                      height: 2,
+                                      color: Colors.orange[200],
+                                    ),
+                                  ..._tempRows.map((label) {
+                                    final isTimee = label.startsWith('タイミー');
+                                    return Row(
+                                      children: [
+                                        Container(
+                                          width: 70,
+                                          height: 44,
+                                          decoration: BoxDecoration(
+                                            color: Colors.orange[50],
+                                            border: Border.all(
+                                                color: Colors.grey[300]!,
+                                                width: 0.5),
+                                          ),
+                                          alignment: Alignment.center,
+                                          padding: const EdgeInsets.all(4),
+                                          child: Text(
+                                            label,
+                                            style: TextStyle(
+                                              fontSize: 10,
+                                              color: isTimee
+                                                  ? Colors.orange[700]
+                                                  : Colors.deepOrange[700],
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                            textAlign: TextAlign.center,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                        ...dates.map((date) {
+                                          final dateStr = date
+                                              .toIso8601String()
+                                              .substring(0, 10);
+                                          final temps =
+                                              _tempShifts[dateStr] ?? [];
+                                          final temp = temps.firstWhere(
+                                            (t) =>
+                                                (t['temp_label'] ?? '') ==
+                                                label,
+                                            orElse: () => {},
+                                          );
 
-                                          return GestureDetector(
-                                            onTap: () {
-                                              Navigator.push(
-                                                context,
-                                                MaterialPageRoute(
-                                                  builder: (_) => ShiftTimelineScreen(
-  date: date,
-  storeId: widget.storeId,
-  storeName: widget.storeName,
-  confirmedShifts: _confirmedShifts.values.toList(),
-  staff: _staff,
-  shiftRequests: _shiftRequests.values.toList(),
-  dayOffRequests: _dayOffRequests.values.toList(),
-  allDates: dates,
-),
-                                                ),
-                                              ).then(
-                                                  (_) => _loadData());
-                                            },
-                                            child: Container(
+                                          if (temp.isEmpty) {
+                                            return Container(
                                               width: 62,
-                                              height: 68,
+                                              height: 44,
                                               decoration: BoxDecoration(
-                                                color: isSunday
-                                                    ? Colors.red[50]
-                                                    : isSaturday
-                                                        ? Colors
-                                                            .blue[50]
-                                                        : Colors
-                                                            .grey[100],
+                                                color: Colors.white,
                                                 border: Border.all(
-                                                    color: Colors
-                                                        .grey[300]!,
+                                                    color: Colors.grey[200]!,
                                                     width: 0.5),
                                               ),
-                                              alignment:
-                                                  Alignment.center,
-                                              child: Column(
-                                                mainAxisAlignment:
-                                                    MainAxisAlignment
-                                                        .center,
-                                                children: [
-                                                  Text(
-                                                    fmt.format(date),
-                                                    style: TextStyle(
-                                                      fontSize: 10,
-                                                      fontWeight:
-                                                          FontWeight
-                                                              .bold,
-                                                      color: isSunday
-                                                          ? Colors.red
-                                                          : isSaturday
-                                                              ? Colors
-                                                                  .blue
-                                                              : Colors
-                                                                  .black87,
-                                                    ),
-                                                  ),
-                                                  Text(
-                                                    fmtDay
-                                                        .format(date),
-                                                    style: TextStyle(
-                                                      fontSize: 9,
-                                                      color: isSunday
-                                                          ? Colors.red
-                                                          : isSaturday
-                                                              ? Colors
-                                                                  .blue
-                                                              : Colors
-                                                                  .grey[600],
-                                                    ),
-                                                  ),
-                                                  const SizedBox(
-                                                      height: 4),
-                                                  Container(
-                                                    padding:
-                                                        const EdgeInsets
-                                                            .symmetric(
-                                                            horizontal:
-                                                                4,
-                                                            vertical:
-                                                                2),
-                                                    decoration:
-                                                        BoxDecoration(
-                                                      color: confirmedCnt >
-                                                              0
-                                                          ? Colors
-                                                              .teal[600]
-                                                          : Colors
-                                                              .grey[500],
-                                                      borderRadius:
-                                                          BorderRadius
-                                                              .circular(
-                                                                  4),
-                                                    ),
-                                                    child: Row(
-                                                      mainAxisSize:
-                                                          MainAxisSize
-                                                              .min,
-                                                      children: [
-                                                        const Icon(
-                                                            Icons
-                                                                .people,
-                                                            size: 8,
-                                                            color: Colors
-                                                                .white),
-                                                        const SizedBox(
-                                                            width: 2),
-                                                        Text(
-                                                          confirmedCnt >
-                                                                  0
-                                                              ? '$confirmedCnt人確定'
-                                                              : '人員確認',
-                                                          style:
-                                                              const TextStyle(
-                                                            fontSize: 7,
-                                                            color: Colors
-                                                                .white,
-                                                            fontWeight:
-                                                                FontWeight
-                                                                    .bold,
-                                                          ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  ),
-                                                ],
+                                            );
+                                          }
+
+                                          final start = temp['start_time']
+                                                  ?.toString()
+                                                  .substring(0, 5) ??
+                                              '';
+                                          final isLast = temp['is_last'] == true;
+                                          final end = isLast
+                                              ? 'L'
+                                              : temp['end_time']
+                                                      ?.toString()
+                                                      .substring(0, 5) ??
+                                                  '';
+
+                                          return Container(
+                                            width: 62,
+                                            height: 44,
+                                            decoration: BoxDecoration(
+                                              color: Colors.orange[50],
+                                              border: Border.all(
+                                                  color: Colors.grey[200]!,
+                                                  width: 0.5),
+                                            ),
+                                            alignment: Alignment.center,
+                                            child: Container(
+                                              margin: const EdgeInsets.all(2),
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      horizontal: 2,
+                                                      vertical: 1),
+                                              decoration: BoxDecoration(
+                                                color: Colors.orange[400],
+                                                borderRadius:
+                                                    BorderRadius.circular(3),
+                                              ),
+                                              child: Text(
+                                                '$start\n~$end',
+                                                style: const TextStyle(
+                                                  fontSize: 7,
+                                                  color: Colors.white,
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                                textAlign: TextAlign.center,
                                               ),
                                             ),
                                           );
                                         }),
                                       ],
-                                    ),
-                                    ..._staff.map((m) {
-                                      final profile =
-                                          m['user_profiles']
-                                              as Map<String, dynamic>;
-                                      final userId =
-                                          profile['id'] as String;
-                                      final name =
-                                          profile['name'] as String;
-
-                                      return Row(
-                                        children: [
-                                          Container(
-                                            width: 70,
-                                            height: 52,
-                                            decoration: BoxDecoration(
-                                              color: Colors.teal[50],
-                                              border: Border.all(
-                                                  color:
-                                                      Colors.grey[300]!,
-                                                  width: 0.5),
-                                            ),
-                                            alignment: Alignment.center,
-                                            padding:
-                                                const EdgeInsets.all(4),
-                                            child: Text(
-                                              name,
-                                              style: TextStyle(
-                                                fontSize: 11,
-                                                fontWeight:
-                                                    FontWeight.w500,
-                                                color: Colors.teal[800],
-                                              ),
-                                              textAlign:
-                                                  TextAlign.center,
-                                              overflow:
-                                                  TextOverflow.ellipsis,
-                                            ),
-                                          ),
-                                          ...dates.map((date) {
-                                            final dateStr = date
-                                                .toIso8601String()
-                                                .substring(0, 10);
-                                            return Container(
-                                              width: 62,
-                                              height: 52,
-                                              decoration: BoxDecoration(
-                                                color: _getCellColor(
-                                                    userId, dateStr),
-                                                border: Border.all(
-                                                    color: Colors
-                                                        .grey[200]!,
-                                                    width: 0.5),
-                                              ),
-                                              alignment: Alignment.center,
-                                              child: Text(
-                                                _getCellText(
-                                                    userId, dateStr),
-                                                style: TextStyle(
-                                                  fontSize: 8,
-                                                  color: _getCellTextColor(
-                                                      userId, dateStr),
-                                                  fontWeight:
-                                                      FontWeight.w500,
-                                                ),
-                                                textAlign:
-                                                    TextAlign.center,
-                                              ),
-                                            );
-                                          }),
-                                        ],
-                                      );
-                                    }),
-                                    if (_tempRows.isNotEmpty)
-                                      Container(
-                                        height: 2,
-                                        color: Colors.orange[200],
-                                      ),
-                                    ..._tempRows.map((label) {
-                                      final isTimee =
-                                          label.startsWith('タイミー');
-                                      return Row(
-                                        children: [
-                                          Container(
-                                            width: 70,
-                                            height: 44,
-                                            decoration: BoxDecoration(
-                                              color: Colors.orange[50],
-                                              border: Border.all(
-                                                  color:
-                                                      Colors.grey[300]!,
-                                                  width: 0.5),
-                                            ),
-                                            alignment: Alignment.center,
-                                            padding:
-                                                const EdgeInsets.all(4),
-                                            child: Text(
-                                              label,
-                                              style: TextStyle(
-                                                fontSize: 10,
-                                                color: isTimee
-                                                    ? Colors.orange[700]
-                                                    : Colors
-                                                        .deepOrange[700],
-                                                fontWeight:
-                                                    FontWeight.w500,
-                                              ),
-                                              textAlign:
-                                                  TextAlign.center,
-                                              overflow:
-                                                  TextOverflow.ellipsis,
-                                            ),
-                                          ),
-                                          ...dates.map((date) {
-                                            final dateStr = date
-                                                .toIso8601String()
-                                                .substring(0, 10);
-                                            final temps =
-                                                _tempShifts[dateStr] ??
-                                                    [];
-                                            final temp = temps.firstWhere(
-                                              (t) =>
-                                                  (t['temp_label'] ??
-                                                      '') ==
-                                                  label,
-                                              orElse: () => {},
-                                            );
-
-                                            if (temp.isEmpty) {
-                                              return Container(
-                                                width: 62,
-                                                height: 44,
-                                                decoration: BoxDecoration(
-                                                  color: Colors.white,
-                                                  border: Border.all(
-                                                      color: Colors
-                                                          .grey[200]!,
-                                                      width: 0.5),
-                                                ),
-                                              );
-                                            }
-
-                                            final start = temp[
-                                                        'start_time']
-                                                    ?.toString()
-                                                    .substring(0, 5) ??
-                                                '';
-                                            final isLast =
-                                                temp['is_last'] == true;
-                                            final end = isLast
-                                                ? 'L'
-                                                : temp['end_time']
-                                                        ?.toString()
-                                                        .substring(
-                                                            0, 5) ??
-                                                    '';
-
-                                            return Container(
-                                              width: 62,
-                                              height: 44,
-                                              decoration: BoxDecoration(
-                                                color: Colors.orange[50],
-                                                border: Border.all(
-                                                    color: Colors
-                                                        .grey[200]!,
-                                                    width: 0.5),
-                                              ),
-                                              alignment: Alignment.center,
-                                              child: Container(
-                                                margin:
-                                                    const EdgeInsets.all(
-                                                        2),
-                                                padding: const EdgeInsets
-                                                    .symmetric(
-                                                    horizontal: 2,
-                                                    vertical: 1),
-                                                decoration: BoxDecoration(
-                                                  color:
-                                                      Colors.orange[400],
-                                                  borderRadius:
-                                                      BorderRadius
-                                                          .circular(3),
-                                                ),
-                                                child: Text(
-                                                  '$start\n~$end',
-                                                  style: const TextStyle(
-                                                    fontSize: 7,
-                                                    color: Colors.white,
-                                                    fontWeight:
-                                                        FontWeight.bold,
-                                                  ),
-                                                  textAlign:
-                                                      TextAlign.center,
-                                                ),
-                                              ),
-                                            );
-                                          }),
-                                        ],
-                                      );
-                                    }),
-                                  ],
-                                ),
+                                    );
+                                  }),
+                                ],
                               ),
                             ),
                           ),
@@ -859,14 +795,12 @@ class _AdminShiftOverviewScreenState
       height: height,
       decoration: BoxDecoration(
         color: Colors.grey[100],
-        border:
-            Border.all(color: Colors.grey[300]!, width: 0.5),
+        border: Border.all(color: Colors.grey[300]!, width: 0.5),
       ),
       alignment: Alignment.center,
       child: Text(
         text,
-        style: const TextStyle(
-            fontSize: 11, fontWeight: FontWeight.bold),
+        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
       ),
     );
   }
@@ -886,8 +820,7 @@ class _AdminShiftOverviewScreenState
         ),
         const SizedBox(width: 4),
         Text(label,
-            style: TextStyle(
-                fontSize: 11, color: Colors.grey[600])),
+            style: TextStyle(fontSize: 11, color: Colors.grey[600])),
       ],
     );
   }
