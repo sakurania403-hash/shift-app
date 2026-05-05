@@ -59,6 +59,9 @@ class HomeCalendarScreenState extends State<HomeCalendarScreen> {
   Map<String, String> _weekdayCloseMap = {};
   Map<String, String> _holidayCloseMap = {};
 
+  // 休憩ルールマップ（storeId → ルールリスト）
+  Map<String, List<Map<String, dynamic>>> _breakRulesMap = {};
+
   @override
   void initState() {
     super.initState();
@@ -224,6 +227,24 @@ class HomeCalendarScreenState extends State<HomeCalendarScreen> {
           _weekdayCloseMap = weekdayMap;
           _holidayCloseMap = holidayMap;
         }
+
+        // 休憩ルールを取得
+        final breakMap = <String, List<Map<String, dynamic>>>{};
+        for (final sid in storeIds) {
+          try {
+            final rules = await _supabase
+                .from('store_break_rules')
+                .select()
+                .eq('store_id', sid)
+                .order('work_hours_threshold');
+            breakMap[sid] = rules
+                .map((r) => Map<String, dynamic>.from(r as Map))
+                .toList();
+          } catch (_) {
+            breakMap[sid] = [];
+          }
+        }
+        _breakRulesMap = breakMap;
       } catch (e) {
         debugPrint('loadCloseSettings error: $e');
       }
@@ -472,6 +493,20 @@ class HomeCalendarScreenState extends State<HomeCalendarScreen> {
     return (_myShiftsByStore[_selectedStoreId] ?? []).length;
   }
 
+  // 休憩時間を計算（分）
+  int _calcBreakMinutes(String storeId, int rawMinutes) {
+    final rules = _breakRulesMap[storeId] ?? [];
+    if (rules.isEmpty) return 0;
+    final wh = rawMinutes / 60.0;
+    int bMin = 0;
+    for (final r in rules) {
+      if (wh > (r['work_hours_threshold'] as num).toDouble()) {
+        bMin = r['break_minutes'] as int;
+      }
+    }
+    return bMin;
+  }
+
   // ラスト（end_time=NULL or 00:00始まり）を終業時間に変換して合計時間を計算
   double get _filteredTotalHours {
     double total = 0;
@@ -506,7 +541,10 @@ class HomeCalendarScreenState extends State<HomeCalendarScreen> {
           final ep = endStr.split(':');
           var em = int.parse(ep[0]) * 60 + int.parse(ep[1]);
           if (em <= sm) em += 24 * 60;
-          total += (em - sm) / 60.0;
+          final rawMin = em - sm;
+          final breakMin = _calcBreakMinutes(storeId, rawMin);
+          final workedMin = (rawMin - breakMin).clamp(0, rawMin);
+          total += workedMin / 60.0;
         } catch (_) {}
       }
     }

@@ -193,7 +193,7 @@ class _StoreData {
     final wh = rawMin / 60.0;
     int bMin = 0;
     for (final r in breakRules) {
-      if (wh >= (r['work_hours_threshold'] as num).toDouble()) {
+      if (wh > (r['work_hours_threshold'] as num).toDouble()) {
         bMin = r['break_minutes'] as int;
       }
     }
