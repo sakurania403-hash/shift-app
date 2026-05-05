@@ -385,8 +385,11 @@ class _MainScreenState extends State<MainScreen> {
       bottomNavigationBar: destinations.length > 1
           ? NavigationBar(
               selectedIndex: currentIndex,
-              onDestinationSelected: (i) =>
-                  setState(() => _selectedIndex = i),
+              onDestinationSelected: (i) => setState(() {
+                _screenKey++;
+                _screens = null;
+                _selectedIndex = i;
+              }),
               destinations: destinations,
             )
           : null,
